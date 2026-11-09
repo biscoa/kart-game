@@ -1,0 +1,2308 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>KART GAME - Online Memory Match</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PeerJS for Serverless Real-Time Online Multiplayer on GitHub Pages -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Outfit', 'sans-serif'],
+                        display: ['Space Grotesk', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        html, body {
+            width: 100%;
+            height: 100dvh;
+            margin: 0;
+            padding: 0;
+            overflow: hidden; /* ZERO SCROLL MANDATE */
+            background-color: #070b14;
+            background-image: 
+                radial-gradient(at 10% 10%, rgba(99, 102, 241, 0.16) 0px, transparent 50%),
+                radial-gradient(at 90% 90%, rgba(236, 72, 153, 0.12) 0px, transparent 50%),
+                radial-gradient(at 50% 50%, rgba(0, 245, 212, 0.05) 0px, transparent 60%);
+            color: #f8fafc;
+        }
+
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.82);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .glass-card {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* ==========================================
+           STRICT ZERO-SCROLL SQUARE BOARD (1:1 ASPECT RATIO)
+        =========================================== */
+        .board-stage {
+            flex: 1 1 0%;
+            min-height: 0;
+            min-width: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 4px;
+            overflow: hidden;
+        }
+        .square-board {
+            aspect-ratio: 1 / 1;
+            width: min(calc(100dvh - 185px), calc(100vw - 16px));
+            height: min(calc(100dvh - 185px), calc(100vw - 16px));
+            display: grid;
+            margin: auto;
+        }
+        @media (min-width: 1024px) {
+            .square-board {
+                width: min(calc(100dvh - 155px), calc(100vw - 360px));
+                height: min(calc(100dvh - 155px), calc(100vw - 360px));
+            }
+        }
+
+        /* ==========================================
+           TRUE 3D CARD FLIP ANIMATION
+        =========================================== */
+        .MemoryCard {
+            perspective: 900px;
+            width: 100%;
+            height: 100%;
+            min-width: 0;
+            min-height: 0;
+            position: relative;
+        }
+        .card-inner {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            transform-style: preserve-3d;
+            -webkit-transform-style: preserve-3d;
+            transition: transform 0.52s cubic-bezier(0.34, 1.56, 0.64, 1);
+            will-change: transform;
+        }
+        .MemoryCard.card-flipped .card-inner {
+            transform: rotateY(180deg);
+        }
+        .MemoryCard.card-matched .card-inner {
+            transform: rotateY(180deg) scale(0.95);
+        }
+        .card-face {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        /* Card Back (Face Down) */
+        .card-back {
+            transform: rotateY(0deg);
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            border: 1.5px solid rgba(99, 102, 241, 0.4);
+            box-shadow: inset 0 0 10px rgba(99, 102, 241, 0.15);
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .MemoryCard:hover:not(.card-flipped):not(.card-matched) .card-back {
+            border-color: #00f5d4;
+            box-shadow: 0 0 10px rgba(0, 245, 212, 0.35), inset 0 0 10px rgba(0, 245, 212, 0.2);
+        }
+        /* Card Front (Face Up - Revealed by 3D Rotation) */
+        .card-front {
+            transform: rotateY(180deg);
+            background: linear-gradient(135deg, #1e1b4b 0%, #311042 100%);
+            border: 1.5px solid #818cf8;
+            box-shadow: 0 0 14px rgba(99, 102, 241, 0.45);
+        }
+        .MemoryCard.card-matched .card-front {
+            background: linear-gradient(135deg, #064e3b 0%, #0f172a 100%);
+            border-color: #10b981;
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.6);
+            animation: matchPop 0.5s ease-out;
+        }
+        .MemoryCard.card-mismatch .card-front {
+            background: linear-gradient(135deg, #7f1d1d 0%, #1e1b4b 100%);
+            border-color: #ef4444;
+            animation: mismatchShake 0.4s ease-in-out;
+        }
+
+        @keyframes matchPop {
+            0% { transform: rotateY(180deg) scale(1); }
+            50% { transform: rotateY(180deg) scale(1.12); box-shadow: 0 0 28px #10b981; }
+            100% { transform: rotateY(180deg) scale(0.95); }
+        }
+        @keyframes mismatchShake {
+            0%, 100% { transform: rotateY(180deg) translateX(0); }
+            25% { transform: rotateY(180deg) translateX(-4px); }
+            75% { transform: rotateY(180deg) translateX(4px); }
+        }
+
+        /* Active Player Glow */
+        .active-turn-ring {
+            box-shadow: 0 0 0 2px #00f5d4, 0 0 15px rgba(0, 245, 212, 0.45);
+        }
+
+        /* Epic Streak Animation */
+        @keyframes streakPop {
+            0% { transform: scale(0.3) rotate(-6deg); opacity: 0; }
+            60% { transform: scale(1.08) rotate(2deg); opacity: 1; }
+            100% { transform: scale(1) rotate(0deg); opacity: 1; }
+        }
+        .streak-banner-anim {
+            animation: streakPop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+        }
+
+        /* Custom thin scrollbars for internal lists only */
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.4); }
+        ::-webkit-scrollbar-thumb { background: rgba(99, 102, 241, 0.45); border-radius: 9999px; }
+    </style>
+</head>
+<body class="flex flex-col h-[100dvh] w-screen overflow-hidden select-none">
+
+    <!-- Confetti Canvas -->
+    <canvas id="fxCanvas" class="fixed inset-0 pointer-events-none z-50"></canvas>
+
+    <!-- EPIC STREAK & +2 BONUS OVERLAY -->
+    <div id="streakOverlay" class="fixed inset-0 pointer-events-none z-50 hidden items-center justify-center bg-black/45 backdrop-blur-[2px]">
+        <div class="streak-banner-anim text-center px-7 py-5 rounded-3xl border-2 border-amber-400 bg-gradient-to-br from-indigo-950/95 via-purple-900/95 to-pink-950/95 shadow-[0_0_80px_rgba(236,72,153,0.7)] max-w-md mx-4">
+            <div id="streakEmoji" class="text-5xl sm:text-6xl mb-1 animate-bounce">🔥</div>
+            <h2 id="streakTitle" class="font-display font-black text-2xl sm:text-4xl text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-pink-400 to-cyan-300 uppercase">
+                3x STREAK BONUS!
+            </h2>
+            <div id="streakBonusPill" class="hidden mt-2 inline-block px-4 py-1 rounded-full bg-emerald-500/20 border border-emerald-400 text-emerald-300 font-black text-sm sm:text-base">
+                🎁 +2 EXTRA BONUS POINTS AWARDED!
+            </div>
+            <p id="streakSubtitle" class="text-indigo-200 font-semibold text-xs sm:text-sm mt-1.5">
+                Player keeps the turn!
+            </p>
+        </div>
+    </div>
+
+    <!-- COMPACT TOP BAR -->
+    <header class="glass-panel z-30 border-b border-slate-800/80 px-2.5 sm:px-5 py-1.5 shrink-0">
+        <div class="max-w-7xl mx-auto flex items-center justify-between gap-2">
+            <!-- Brand -->
+            <div class="flex items-center gap-2 cursor-pointer" onclick="app.confirmLeaveRoom()">
+                <div class="w-8 h-8 rounded-lg bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-500 flex items-center justify-center shadow border border-white/20">
+                    <i class="fa-solid fa-layer-group text-white text-sm"></i>
+                </div>
+                <div>
+                    <div class="flex items-center gap-1.5">
+                        <span class="font-display font-extrabold text-sm sm:text-base tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-indigo-200 to-teal-300">
+                            KART GAME
+                        </span>
+                        <span class="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                            PvP Online
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Room Quick Controls (Visible when inside a room) -->
+            <div id="headerRoomBar" class="hidden items-center gap-1.5 sm:gap-2">
+                <div class="px-2 py-1 rounded-lg bg-indigo-950/90 border border-indigo-500/40 flex items-center gap-1.5">
+                    <span class="text-[10px] uppercase font-bold text-indigo-300 hidden sm:inline">Code:</span>
+                    <span id="displayRoomCode" class="font-mono font-black text-xs sm:text-sm text-teal-300 tracking-wider">------</span>
+                    <button onclick="app.copyInviteLink()" class="text-[10px] bg-indigo-600/50 hover:bg-indigo-600 text-white px-1.5 py-0.5 rounded transition" title="Copy Invite Link">
+                        <i class="fa-regular fa-copy"></i> <span class="hidden md:inline">Invite</span>
+                    </button>
+                </div>
+
+                <span id="badgeRoomStatus" class="hidden sm:inline-flex px-2 py-1 rounded-lg text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 items-center gap-1">
+                    <i class="fa-solid fa-users"></i> Squad Open
+                </span>
+
+                <!-- Mobile Chat Drawer Toggle Button -->
+                <button onclick="app.toggleMobileChat()" class="lg:hidden relative px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 text-xs font-bold flex items-center gap-1">
+                    <i class="fa-solid fa-comments"></i>
+                    <span id="chatUnreadDot" class="hidden w-2 h-2 rounded-full bg-pink-500 absolute -top-0.5 -right-0.5"></span>
+                </button>
+
+                <!-- Always-Accessible Leave Room Button -->
+                <button onclick="app.confirmLeaveRoom()" class="px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/40 text-rose-300 border border-rose-500/40 text-xs font-bold transition flex items-center gap-1">
+                    <i class="fa-solid fa-right-from-bracket"></i>
+                    <span>Leave</span>
+                </button>
+            </div>
+
+            <!-- Right Utility Buttons -->
+            <div class="flex items-center gap-1.5">
+                <button onclick="soundFX.toggle()" class="p-1.5 sm:px-2.5 sm:py-1 rounded-lg glass-card hover:bg-slate-800 text-slate-200 text-xs font-semibold flex items-center gap-1 transition" title="Toggle Sound">
+                    <i id="iconSound" class="fa-solid fa-volume-high text-teal-400"></i>
+                </button>
+                <button onclick="app.downloadHTMLFile()" class="px-2 sm:px-2.5 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 text-[11px] font-semibold flex items-center gap-1 transition" title="Download single index.html for GitHub Pages">
+                    <i class="fa-solid fa-download"></i>
+                    <span class="hidden md:inline">index.html</span>
+                </button>
+                <button onclick="app.toggleModal('githubModal', true)" class="px-2 sm:px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 text-[11px] font-semibold flex items-center gap-1 transition">
+                    <i class="fa-brands fa-github"></i>
+                    <span class="hidden sm:inline">GitHub</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- MAIN WORKSPACE (FITS 100dvh WITHOUT SCROLLING) -->
+    <main class="flex-1 min-h-0 w-full max-w-7xl mx-auto px-2 sm:px-4 py-2 flex flex-col overflow-hidden">
+
+        <!-- ==========================================
+             VIEW 1: HOME / ENTRY SCREEN
+        =========================================== -->
+        <section id="viewHome" class="flex-1 min-h-0 flex items-center justify-center overflow-y-auto py-2">
+            <div class="max-w-4xl w-full grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch my-auto">
+                
+                <!-- Left Column: Profile & Rules -->
+                <div class="lg:col-span-7 glass-panel rounded-3xl p-5 sm:p-6 flex flex-col justify-between relative overflow-hidden shadow-2xl">
+                    <div>
+                        <div class="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-teal-500/10 border border-teal-500/30 text-teal-300 text-[11px] font-semibold mb-3">
+                            <span class="w-2 h-2 rounded-full bg-teal-400 animate-ping"></span>
+                            Square Grids up to 20x20 • 3D Flip • Live Spectator Mode
+                        </div>
+                        <h1 class="font-display text-2xl sm:text-3xl font-extrabold text-white tracking-tight leading-tight">
+                            KART GAME Online <br>
+                            <span class="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-pink-400 to-teal-300">Flip, Match & Dominate!</span>
+                        </h1>
+
+                        <!-- Nickname & Avatar -->
+                        <div class="mt-4 bg-slate-900/80 border border-slate-700/80 rounded-2xl p-3.5">
+                            <label class="block text-[11px] font-bold uppercase tracking-wider text-indigo-300 mb-2">
+                                <i class="fa-solid fa-user-astronaut mr-1"></i> Step 1: Enter Your Player Name & Avatar
+                            </label>
+                            <div class="flex flex-col sm:flex-row gap-2.5">
+                                <input id="inputNickname" type="text" maxlength="16" placeholder="Your Nickname..." 
+                                    class="flex-1 bg-slate-950 border border-slate-700 focus:border-indigo-500 rounded-xl px-3.5 py-2.5 text-white font-semibold text-sm outline-none transition">
+                                <div id="avatarSelector" class="flex items-center justify-center gap-1 bg-slate-950 px-2 py-1 rounded-xl border border-slate-800">
+                                    <button type="button" onclick="app.selectAvatar('🦊')" class="avatar-btn w-8 h-8 rounded-lg text-base flex items-center justify-center bg-indigo-600/30 border border-indigo-400">🦊</button>
+                                    <button type="button" onclick="app.selectAvatar('🐯')" class="avatar-btn w-8 h-8 rounded-lg text-base flex items-center justify-center hover:bg-slate-800">🐯</button>
+                                    <button type="button" onclick="app.selectAvatar('🐼')" class="avatar-btn w-8 h-8 rounded-lg text-base flex items-center justify-center hover:bg-slate-800">🐼</button>
+                                    <button type="button" onclick="app.selectAvatar('🦁')" class="avatar-btn w-8 h-8 rounded-lg text-base flex items-center justify-center hover:bg-slate-800">🦁</button>
+                                    <button type="button" onclick="app.selectAvatar('🐸')" class="avatar-btn w-8 h-8 rounded-lg text-base flex items-center justify-center hover:bg-slate-800">🐸</button>
+                                    <button type="button" onclick="app.selectAvatar('🦄')" class="avatar-btn w-8 h-8 rounded-lg text-base flex items-center justify-center hover:bg-slate-800">🦄</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Rules Summary -->
+                        <div class="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+                            <div class="glass-card p-2.5 rounded-xl border border-slate-800">
+                                <div class="text-teal-400 font-bold text-[11px]"><i class="fa-solid fa-gift mr-1"></i> 3x Streak = +2 Pts</div>
+                                <p class="text-slate-400 text-[10px] mt-0.5">Keep turn on match! Get 3 in a row for +2 bonus points!</p>
+                            </div>
+                            <div class="glass-card p-2.5 rounded-xl border border-slate-800">
+                                <div class="text-amber-400 font-bold text-[11px]"><i class="fa-solid fa-stopwatch mr-1"></i> 30s / 10s Timers</div>
+                                <p class="text-slate-400 text-[10px] mt-0.5">30s to start turn (3 AFK = Kick), 10s for 2nd card!</p>
+                            </div>
+                            <div class="glass-card p-2.5 rounded-xl border border-slate-800 col-span-2 sm:col-span-1">
+                                <div class="text-indigo-400 font-bold text-[11px]"><i class="fa-solid fa-eye mr-1"></i> Live Spectator</div>
+                                <p class="text-slate-400 text-[10px] mt-0.5">Join mid-game to watch live & play in the next round!</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
+                        <span><i class="fa-solid fa-maximize text-indigo-400 mr-1"></i> Full-Screen Square Board (No Scroll)</span>
+                        <span id="mySessionStats" class="text-amber-300 font-bold">🏆 Win Streak: 0</span>
+                    </div>
+                </div>
+
+                <!-- Right Column: Create or Join -->
+                <div class="lg:col-span-5 flex flex-col gap-3.5">
+                    <!-- Create Room -->
+                    <div class="glass-panel rounded-3xl p-5 border border-indigo-500/30 shadow-xl flex-1 flex flex-col justify-between">
+                        <div>
+                            <div class="flex items-center justify-between mb-2">
+                                <h2 class="font-display text-lg font-bold text-white flex items-center gap-2">
+                                    <i class="fa-solid fa-crown text-amber-400"></i> Create Squad Room
+                                </h2>
+                                <span class="text-[10px] bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full font-semibold">Host</span>
+                            </div>
+
+                            <div class="space-y-2.5">
+                                <div>
+                                    <label class="text-[10px] font-bold uppercase text-slate-400 block mb-1">Game Mode</label>
+                                    <select id="createModeSelect" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-semibold outline-none focus:border-indigo-500">
+                                        <option value="ffa-2">Free-For-All (Max 2 Players)</option>
+                                        <option value="ffa-4" selected>Free-For-All (Max 4 Players)</option>
+                                        <option value="ffa-6">Free-For-All (Max 6 Players)</option>
+                                        <option value="team-2v2">Teams: 2 vs 2 (4 Players)</option>
+                                        <option value="team-3v3">Teams: 3 vs 3 (6 Players)</option>
+                                        <option value="team-4v4">Teams: 4 vs 4 (8 Players)</option>
+                                    </select>
+                                </div>
+
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label class="text-[10px] font-bold uppercase text-slate-400 block mb-1">Card Theme</label>
+                                        <select id="createCategorySelect" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-2 text-xs text-white font-semibold outline-none">
+                                            <option value="mix">🌟 Mega Mix (All)</option>
+                                            <option value="fruits" selected>🍎 Fruits</option>
+                                            <option value="animals">🦁 Animals</option>
+                                            <option value="insects">🦋 Insects</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="text-[10px] font-bold uppercase text-slate-400 block mb-1">Square Grid Size</label>
+                                        <select id="createGridSizeSelect" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-2 text-xs text-teal-300 font-bold outline-none">
+                                            <option value="4">4×4 (16 Cards)</option>
+                                            <option value="6" selected>6×6 (36 Cards)</option>
+                                            <option value="8">8×8 (64 Cards)</option>
+                                            <option value="10">10×10 (100 Cards)</option>
+                                            <option value="12">12×12 (144 Cards)</option>
+                                            <option value="16">16×16 (256 Cards)</option>
+                                            <option value="20">20×20 (400 Cards!)</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <button onclick="app.createRoom()" class="mt-4 w-full py-3 rounded-xl bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-500 hover:to-pink-500 text-white font-bold text-xs sm:text-sm shadow-lg flex items-center justify-center gap-2 transition active:scale-95">
+                            <i class="fa-solid fa-plus-circle"></i> Create Room & Get Code
+                        </button>
+                    </div>
+
+                    <!-- Join Room (Supports Joining Lobby OR Watching Live Match as Spectator) -->
+                    <div class="glass-panel rounded-3xl p-4 sm:p-5 border border-teal-500/30 shadow-xl">
+                        <h2 class="font-display text-base font-bold text-white flex items-center gap-2 mb-1">
+                            <i class="fa-solid fa-right-to-bracket text-teal-400"></i> Join or Spectate Room
+                        </h2>
+                        <p class="text-[11px] text-slate-400 mb-2.5">Enter Room Code (If match is in progress, you'll watch live!):</p>
+                        <div class="flex gap-2">
+                            <input id="inputJoinCode" type="text" maxlength="12" placeholder="CODE (e.g. KART99)" 
+                                class="flex-1 uppercase bg-slate-950 border border-slate-700 focus:border-teal-400 rounded-xl px-3.5 py-2.5 text-white font-mono font-bold text-xs tracking-widest outline-none">
+                            <button onclick="app.joinRoomByInput()" class="px-5 py-2.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-extrabold text-xs transition shadow-lg">
+                                Join / Watch
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+        <!-- ==========================================
+             VIEW 2: KICKED / ROOM NOTICE SCREEN
+        =========================================== -->
+        <section id="viewLocked" class="hidden flex-1 items-center justify-center py-4">
+            <div class="max-w-md w-full glass-panel rounded-3xl p-7 text-center border border-rose-500/40 shadow-2xl">
+                <div class="w-16 h-16 rounded-2xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center mx-auto mb-4 text-rose-400 text-3xl">
+                    <i id="lockedIcon" class="fa-solid fa-user-slash"></i>
+                </div>
+                <h2 id="lockedTitle" class="font-display text-xl font-extrabold text-white mb-2">
+                    Removed from Room
+                </h2>
+                <p id="lockedMessage" class="text-slate-300 text-xs sm:text-sm leading-relaxed mb-5">
+                    You were removed from the room by the Host or due to 3 AFK turn timeouts.
+                </p>
+                <button onclick="app.returnToHome()" class="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs sm:text-sm transition">
+                    <i class="fa-solid fa-house mr-1.5"></i> Back to Main Menu
+                </button>
+            </div>
+        </section>
+
+        <!-- ==========================================
+             VIEW 3: ACTIVE ROOM (ZERO-SCROLL WORKSPACE)
+        =========================================== -->
+        <section id="viewRoom" class="hidden flex-1 min-h-0 flex-row gap-3 overflow-hidden relative">
+            
+            <!-- LEFT / MAIN COLUMN: Lobby OR Zero-Scroll Square Game Board -->
+            <div class="flex-1 min-w-0 min-h-0 flex flex-col gap-2 overflow-hidden">
+
+                <!-- SPECTATOR MODE LIVE BANNER (Shown if user joined after match started) -->
+                <div id="spectatorBanner" class="hidden px-3 py-1.5 rounded-xl bg-amber-500/20 border border-amber-400/50 text-amber-200 text-xs font-bold items-center justify-between shrink-0">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-eye text-amber-400 animate-pulse"></i>
+                        <span>SPECTATOR MODE — Watching Live Match! You will automatically join the squad when this round finishes.</span>
+                    </div>
+                    <button onclick="app.confirmLeaveRoom()" class="text-[11px] underline text-rose-300 hover:text-white ml-2 shrink-0">Leave</button>
+                </div>
+
+                <!-- SUB-VIEW 3A: SQUAD WAITING LOBBY -->
+                <div id="subviewLobby" class="glass-panel rounded-3xl p-4 sm:p-6 flex-1 min-h-0 flex flex-col justify-between overflow-y-auto">
+                    <div>
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-800">
+                            <div>
+                                <h2 class="font-display text-xl sm:text-2xl font-extrabold text-white flex items-center gap-2">
+                                    <i class="fa-solid fa-users-rays text-indigo-400"></i> Squad Lobby
+                                </h2>
+                                <p class="text-xs text-slate-400 mt-0.5">
+                                    Share the code with friends. Anyone joining mid-game will spectate live until the round ends!
+                                </p>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button onclick="app.copyInviteLink()" class="px-3.5 py-2 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 shadow transition">
+                                    <i class="fa-solid fa-share-nodes"></i> Copy Invite Link
+                                </button>
+                                <button onclick="app.confirmLeaveRoom()" class="px-3.5 py-2 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 font-bold text-xs transition">
+                                    Leave Squad
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Host Settings (Square Grid up to 20x20) -->
+                        <div class="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-2.5 bg-slate-900/70 p-3.5 rounded-2xl border border-slate-800">
+                            <div>
+                                <label class="text-[10px] font-bold uppercase text-indigo-300 block mb-1">Game Mode</label>
+                                <select id="lobbyModeSelect" onchange="app.hostUpdateSettings()" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-2 text-xs text-white font-semibold">
+                                    <option value="ffa-2">Free-For-All (2 Players)</option>
+                                    <option value="ffa-4">Free-For-All (4 Players)</option>
+                                    <option value="ffa-6">Free-For-All (6 Players)</option>
+                                    <option value="team-2v2">Teams: 2 vs 2 (4 Players)</option>
+                                    <option value="team-3v3">Teams: 3 vs 3 (6 Players)</option>
+                                    <option value="team-4v4">Teams: 4 vs 4 (8 Players)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="text-[10px] font-bold uppercase text-indigo-300 block mb-1">Card Theme</label>
+                                <select id="lobbyCategorySelect" onchange="app.hostUpdateSettings()" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-2 text-xs text-white font-semibold">
+                                    <option value="mix">🌟 Mega Mix (All)</option>
+                                    <option value="fruits">🍎 Fruits Theme</option>
+                                    <option value="animals">🦁 Animals Theme</option>
+                                    <option value="insects">🦋 Insects Theme</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="text-[10px] font-bold uppercase text-teal-300 block mb-1">Square Grid Size (N×N)</label>
+                                <select id="lobbyGridSizeSelect" onchange="app.hostUpdateSettings()" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-2 text-xs text-teal-300 font-bold">
+                                    <option value="4">4×4 Grid (16 Cards)</option>
+                                    <option value="6">6×6 Grid (36 Cards)</option>
+                                    <option value="8">8×8 Grid (64 Cards)</option>
+                                    <option value="10">10×10 Grid (100 Cards)</option>
+                                    <option value="12">12×12 Grid (144 Cards)</option>
+                                    <option value="16">16×16 Grid (256 Cards)</option>
+                                    <option value="20">20×20 Grid (400 Cards!)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Connected Squad Players & Host Kick Controls -->
+                        <div class="mt-4">
+                            <div class="flex items-center justify-between mb-2.5">
+                                <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400">
+                                    Squad Members (<span id="lobbyPlayerCount">1/4</span>)
+                                </h3>
+                                <div id="hostBotControls" class="flex items-center gap-2">
+                                    <button onclick="app.hostAddBot()" class="text-xs px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-teal-300 border border-teal-500/30 font-semibold transition">
+                                        <i class="fa-solid fa-robot mr-1"></i> + Add AI Player
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="lobbyPlayersGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5"></div>
+                        </div>
+                    </div>
+
+                    <div class="mt-5 pt-3 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
+                        <div class="text-xs text-slate-400 flex items-center gap-2">
+                            <i class="fa-solid fa-circle-info text-indigo-400"></i>
+                            <span id="lobbyStatusHint">Host can start the match once at least 2 players are in the squad.</span>
+                        </div>
+                        <button id="btnStartMatch" onclick="app.hostStartGame()" class="w-full sm:w-auto px-7 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs sm:text-sm shadow-lg transition flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-play"></i> Start Match Now
+                        </button>
+                    </div>
+                </div>
+
+                <!-- SUB-VIEW 3B: ZERO-SCROLL ACTIVE GAMEPLAY -->
+                <div id="subviewGame" class="hidden flex-1 min-h-0 flex-col gap-1.5 overflow-hidden">
+                    
+                    <!-- Compact Turn + Timer + Team Score Bar -->
+                    <div class="glass-panel rounded-2xl px-3 py-2 border border-slate-800 shrink-0">
+                        <div class="flex items-center justify-between gap-2">
+                            <!-- Active Player Info -->
+                            <div class="flex items-center gap-2.5 min-w-0">
+                                <div id="turnAvatar" class="w-9 h-9 rounded-xl bg-indigo-600/30 border border-teal-400 flex items-center justify-center text-lg shrink-0">
+                                    🦊
+                                </div>
+                                <div class="min-w-0">
+                                    <div class="flex items-center gap-1.5 flex-wrap">
+                                        <span id="turnBadgeLabel" class="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-teal-400 text-slate-950">
+                                            TURN
+                                        </span>
+                                        <h3 id="turnPlayerName" class="font-display font-extrabold text-xs sm:text-sm text-white truncate">
+                                            Player's Turn
+                                        </h3>
+                                        <span id="turnComboBadge" class="hidden text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                                            🔥 2x Streak
+                                        </span>
+                                    </div>
+                                    <p id="turnSubInstruction" class="text-[10px] text-slate-300 truncate">
+                                        Flip 1st card within 30s! (3x Streak = +2 Bonus Pts)
+                                    </p>
+                                </div>
+                            </div>
+
+                            <!-- Team Score Pill (If Team Mode) -->
+                            <div id="teamScoreBanner" class="hidden sm:flex items-center gap-2 bg-slate-950/80 px-2.5 py-1 rounded-xl border border-slate-800 shrink-0">
+                                <span class="text-[10px] font-extrabold text-cyan-300">🔵 Alpha: <strong id="teamAlphaScore" class="text-xs">0</strong></span>
+                                <span class="text-slate-600">|</span>
+                                <span class="text-[10px] font-extrabold text-pink-400">🔴 Bravo: <strong id="teamBravoScore" class="text-xs">0</strong></span>
+                            </div>
+
+                            <!-- Countdown Timer Box -->
+                            <div class="flex items-center gap-2 bg-slate-950/90 px-2.5 py-1 rounded-xl border border-slate-800 shrink-0">
+                                <div class="text-right hidden sm:block">
+                                    <div id="timerPhaseLabel" class="text-[9px] font-bold uppercase text-slate-400">1st Card</div>
+                                    <div id="matchedPairsCounter" class="text-[10px] font-bold text-indigo-300">0/18 Pairs</div>
+                                </div>
+                                <div id="timerNumberBox" class="w-11 h-9 rounded-lg bg-indigo-950 border border-indigo-500/50 flex items-center justify-center font-display font-black text-base sm:text-lg text-teal-300">
+                                    30s
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Thin Timer Progress Bar -->
+                        <div class="w-full h-1 bg-slate-900 rounded-full overflow-hidden mt-1.5">
+                            <div id="timerProgressBar" class="h-full bg-gradient-to-r from-teal-400 via-indigo-500 to-pink-500 transition-all duration-200" style="width: 100%;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Live Scoreboard Strip (All Players' Points + Host Kick Anytime) -->
+                    <div id="gamePlayersStrip" class="flex items-center gap-1.5 overflow-x-auto py-0.5 shrink-0 no-scrollbar">
+                        <!-- Dynamically rendered live player scorecards with points, streak & Host Kick button -->
+                    </div>
+
+                    <!-- THE 1:1 SQUARE ZERO-SCROLL CARD BOARD STAGE -->
+                    <div class="board-stage glass-panel rounded-2xl border border-slate-800/90">
+                        <div id="cardsBoardGrid" class="square-board">
+                            <!-- Square cards injected here -->
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- RIGHT SIDEBAR: LIVE CHAT, SPECTATORS & HOST CONTROLS (Desktop Sidebar + Mobile Drawer) -->
+            <aside id="chatSidebar" class="fixed inset-y-0 right-0 z-40 w-80 max-w-[88vw] translate-x-full lg:static lg:translate-x-0 lg:w-72 xl:w-80 glass-panel lg:rounded-3xl flex flex-col border-l lg:border border-slate-800 overflow-hidden transition-transform duration-300 shrink-0">
+                <!-- Sidebar Header -->
+                <div class="p-3 border-b border-slate-800 flex items-center justify-between bg-slate-900/70">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-comments text-indigo-400"></i>
+                        <h3 class="font-display font-bold text-xs sm:text-sm text-white">Room Chat & Squad</h3>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span id="spectatorCountBadge" class="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold">
+                            👁️ 0 Watching
+                        </span>
+                        <button onclick="app.toggleMobileChat(false)" class="lg:hidden w-7 h-7 rounded-lg bg-slate-800 text-slate-300 flex items-center justify-center">
+                            <i class="fa-solid fa-xmark"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Spectators List (If any spectators are watching, Host can also Kick them) -->
+                <div id="spectatorsListContainer" class="hidden px-3 py-1.5 bg-amber-950/30 border-b border-amber-500/20 text-[11px]">
+                    <div class="font-bold text-amber-300 mb-1 flex items-center justify-between">
+                        <span><i class="fa-solid fa-eye mr-1"></i> Live Spectators (Next Round):</span>
+                    </div>
+                    <div id="spectatorsListItems" class="flex flex-wrap gap-1.5"></div>
+                </div>
+
+                <!-- Quick Reactions -->
+                <div class="px-3 py-1.5 bg-slate-950/60 border-b border-slate-800/80 flex items-center justify-between">
+                    <span class="text-[9px] text-slate-400 font-bold uppercase">React:</span>
+                    <div class="flex items-center gap-1">
+                        <button onclick="app.sendQuickReaction('🔥')" class="hover:scale-125 transition text-sm px-1">🔥</button>
+                        <button onclick="app.sendQuickReaction('😂')" class="hover:scale-125 transition text-sm px-1">😂</button>
+                        <button onclick="app.sendQuickReaction('👏')" class="hover:scale-125 transition text-sm px-1">👏</button>
+                        <button onclick="app.sendQuickReaction('😱')" class="hover:scale-125 transition text-sm px-1">😱</button>
+                        <button onclick="app.sendQuickReaction('🎁')" class="hover:scale-125 transition text-sm px-1">🎁</button>
+                        <button onclick="app.sendQuickReaction('⚡')" class="hover:scale-125 transition text-sm px-1">⚡</button>
+                    </div>
+                </div>
+
+                <!-- Messages Feed -->
+                <div id="chatMessagesList" class="flex-1 p-3 overflow-y-auto space-y-2 text-xs"></div>
+
+                <!-- Chat Input -->
+                <form onsubmit="app.handleChatSubmit(event)" class="p-2.5 bg-slate-900/90 border-t border-slate-800 flex gap-1.5">
+                    <input id="inputChatMessage" type="text" maxlength="140" placeholder="Message the room..." 
+                        class="flex-1 bg-slate-950 border border-slate-700 focus:border-indigo-500 rounded-xl px-3 py-2 text-xs text-white outline-none">
+                    <button type="submit" class="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition">
+                        <i class="fa-solid fa-paper-plane"></i>
+                    </button>
+                </form>
+            </aside>
+
+        </section>
+
+    </main>
+
+    <!-- ==========================================
+         MODAL 1: END-GAME VICTORY PODIUM (SQUAD STAYS TOGETHER!)
+    =========================================== -->
+    <div id="podiumModal" class="fixed inset-0 z-40 hidden items-center justify-center p-3 bg-black/80 backdrop-blur-md overflow-y-auto">
+        <div class="max-w-xl w-full glass-panel rounded-3xl p-5 sm:p-7 border border-indigo-500/40 shadow-2xl my-auto">
+            
+            <div class="text-center">
+                <div id="winStreakCelebration" class="hidden mb-2 inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-amber-500/20 border border-amber-400/50 text-amber-300 text-[11px] font-black uppercase tracking-wider animate-pulse">
+                    <i class="fa-solid fa-fire-flame-curved"></i> <span id="winStreakText">2 WINS IN A ROW!</span>
+                </div>
+                <h2 id="podiumHeadline" class="font-display text-2xl sm:text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-white to-teal-300">
+                    ROUND COMPLETE!
+                </h2>
+                <p class="text-xs text-emerald-300 font-semibold mt-0.5">
+                    <i class="fa-solid fa-link mr-1"></i> Squad stays together! Spectators have now joined the active squad.
+                </p>
+            </div>
+
+            <!-- Top 3 Podium Pillars -->
+            <div id="podiumPillars" class="mt-5 grid grid-cols-3 gap-2.5 items-end pt-2 px-2"></div>
+
+            <!-- Full Leaderboard Table -->
+            <div class="mt-4 bg-slate-950/80 rounded-2xl border border-slate-800 overflow-hidden">
+                <div class="px-3 py-2 bg-slate-900 text-[10px] font-bold uppercase tracking-wider text-slate-400 grid grid-cols-12">
+                    <div class="col-span-1">#</div>
+                    <div class="col-span-5">Player</div>
+                    <div class="col-span-2 text-center">Total Pts</div>
+                    <div class="col-span-2 text-center">Best Streak</div>
+                    <div class="col-span-2 text-right">Action</div>
+                </div>
+                <div id="podiumLeaderboardRows" class="divide-y divide-slate-800/60 text-xs max-h-40 overflow-y-auto"></div>
+            </div>
+
+            <div class="mt-5 flex flex-wrap gap-2.5 justify-between items-center">
+                <button onclick="app.confirmLeaveRoom()" class="px-4 py-2.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 font-bold text-xs transition">
+                    <i class="fa-solid fa-right-from-bracket mr-1"></i> Leave Squad
+                </button>
+                <div class="flex gap-2">
+                    <button onclick="app.hostBackToLobby()" class="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition">
+                        <i class="fa-solid fa-sliders mr-1"></i> Squad Lobby (Change Grid)
+                    </button>
+                    <button id="btnRematch" onclick="app.hostRematch()" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-teal-500 hover:from-indigo-500 hover:to-teal-400 text-slate-950 font-black text-xs shadow-lg transition flex items-center gap-1.5">
+                        <i class="fa-solid fa-rotate-right"></i> Play Next Round
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==========================================
+         MODAL 2: GITHUB PAGES DEPLOYMENT GUIDE
+    =========================================== -->
+    <div id="githubModal" class="fixed inset-0 z-40 hidden items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+        <div class="max-w-lg w-full glass-panel rounded-3xl p-6 border border-indigo-500/40 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+                <h3 class="font-display text-lg font-extrabold text-white flex items-center gap-2">
+                    <i class="fa-brands fa-github text-indigo-400 text-xl"></i> Host on GitHub Pages (Free)
+                </h3>
+                <button onclick="app.toggleModal('githubModal', false)" class="w-8 h-8 rounded-lg bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <ol class="mt-4 space-y-2.5 text-xs text-slate-300 list-decimal list-inside leading-relaxed">
+                <li>Click <button onclick="app.downloadHTMLFile()" class="underline text-emerald-400 font-bold">Download index.html</button> to save this single file.</li>
+                <li>Sign in to <a href="https://github.com" target="_blank" class="text-teal-400 underline">github.com</a> and click <strong>New repository</strong>.</li>
+                <li>Name it <code>kart-game</code> (Public) and click <strong>Create repository</strong>.</li>
+                <li>Click <strong>uploading an existing file</strong>, select <code>index.html</code>, and click <strong>Commit changes</strong>.</li>
+                <li>Go to <strong>Settings → Pages</strong>, set Branch to <strong>main</strong>, and click <strong>Save</strong>. Share your link with friends!</li>
+            </ol>
+            <div class="mt-5 flex justify-end gap-2">
+                <button onclick="app.downloadHTMLFile()" class="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold text-xs">Download index.html</button>
+                <button onclick="app.toggleModal('githubModal', false)" class="px-4 py-2 rounded-xl bg-slate-800 text-white font-bold text-xs">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- TOAST NOTIFICATIONS -->
+    <div id="toastContainer" class="fixed bottom-3 right-3 z-50 flex flex-col gap-1.5 max-w-xs w-full pointer-events-none"></div>
+
+    <!-- ==========================================
+         GAME ENGINE & MULTIPLAYER LOGIC
+    =========================================== -->
+    <script>
+        /* ==========================================================
+           1. RICH SYMBOL POOLS & GENERATOR FOR UP TO 20x20 (200 PAIRS)
+        ========================================================== */
+        const THEME_POOLS = {
+            fruits: ['🍎','🍌','🍇','🍉','🍓','🍒','🍍','🥭','🍑','🥝','🍋','🍊','🍐','🥥','🫐','🍈','🥑','🍏','🍅','🌶️','🌽','🥕','🥦','🍄','🥜'],
+            animals: ['🦁','🐯','🐼','🦊','🐨','🐸','🐵','🦄','🦓','🦒','🐘','🐰','🐻','🐺','🐗','🦝','🦘','🐧','🦉','🦅','🦆','🐢','🐍','🦖','🐙','🐬','🐳','🦈','🐊','🐪'],
+            insects: ['🦋','🐝','🐞','🦂','🕷️','🦗','🪲','🦟','🪳','🪰','🪱','🐛','🐌','🐜','🕸️','🐚','🦎','🦀','🦞','🦐','🦑','🐡','🐠','🐟','🦠']
+        };
+
+        const BADGE_COLORS = [
+            { bg: 'rgba(99,102,241,0.22)', border: '#818cf8', tag: '' },
+            { bg: 'rgba(16,185,129,0.25)', border: '#34d399', tag: '★' },
+            { bg: 'rgba(245,158,11,0.25)', border: '#fbbf24', tag: '◆' },
+            { bg: 'rgba(236,72,153,0.25)', border: '#f472b6', tag: '▲' },
+            { bg: 'rgba(6,182,212,0.25)',  border: '#22d3ee', tag: '●' },
+            { bg: 'rgba(168,85,247,0.25)', border: '#c084fc', tag: '✦' },
+            { bg: 'rgba(239,68,68,0.25)',  border: '#f87171', tag: '♦' },
+            { bg: 'rgba(132,204,22,0.25)', border: '#a3e635', tag: '❖' }
+        ];
+
+        function generateDeckPairs(category, numPairs) {
+            let baseIcons = [];
+            if (category === 'mix') {
+                baseIcons = [...THEME_POOLS.fruits, ...THEME_POOLS.animals, ...THEME_POOLS.insects];
+            } else {
+                baseIcons = [...(THEME_POOLS[category] || THEME_POOLS.fruits)];
+                // If user picked 12x12, 16x16 or 20x20 on a single category, supplement with other themes + color/badge variants
+                if (numPairs > baseIcons.length) {
+                    const extras = [...THEME_POOLS.fruits, ...THEME_POOLS.animals, ...THEME_POOLS.insects];
+                    extras.forEach(ic => { if (!baseIcons.includes(ic)) baseIcons.push(ic); });
+                }
+            }
+
+            const pairs = [];
+            for (let i = 0; i < numPairs; i++) {
+                const icon = baseIcons[i % baseIcons.length];
+                const variantIndex = Math.floor(i / baseIcons.length);
+                const styleObj = BADGE_COLORS[variantIndex % BADGE_COLORS.length];
+                const label = variantIndex === 0 ? '' : `${styleObj.tag}${variantIndex}`;
+                pairs.push({
+                    pairId: `pair_${i}`,
+                    icon: icon,
+                    variantTag: label,
+                    bg: styleObj.bg,
+                    border: styleObj.border
+                });
+            }
+            return pairs;
+        }
+
+        /* ==========================================================
+           2. WEB AUDIO SYNTHESIZER
+        ========================================================== */
+        const soundFX = {
+            enabled: true,
+            ctx: null,
+            init() {
+                if (!this.ctx) {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    if (AudioCtx) this.ctx = new AudioCtx();
+                }
+            },
+            toggle() {
+                this.enabled = !this.enabled;
+                document.getElementById('iconSound').className = this.enabled
+                    ? 'fa-solid fa-volume-high text-teal-400'
+                    : 'fa-solid fa-volume-xmark text-slate-500';
+                app.showToast(this.enabled ? 'Sound Enabled 🔊' : 'Sound Muted 🔇', 'info');
+            },
+            playTone(freq, type = 'sine', duration = 0.12, delay = 0, vol = 0.12) {
+                if (!this.enabled) return;
+                try {
+                    this.init();
+                    if (this.ctx.state === 'suspended') this.ctx.resume();
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = type;
+                    osc.frequency.setValueAtTime(freq, this.ctx.currentTime + delay);
+                    gain.gain.setValueAtTime(vol, this.ctx.currentTime + delay);
+                    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + delay + duration);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(this.ctx.currentTime + delay);
+                    osc.stop(this.ctx.currentTime + delay + duration);
+                } catch (e) {}
+            },
+            flip() { this.playTone(540, 'triangle', 0.08, 0, 0.09); },
+            match(streak = 1) {
+                const base = 440 + Math.min(streak * 65, 350);
+                this.playTone(base, 'sine', 0.11, 0, 0.14);
+                this.playTone(base * 1.25, 'sine', 0.14, 0.08, 0.14);
+                if (streak % 3 === 0) {
+                    // Bonus fanfare
+                    this.playTone(base * 1.5, 'triangle', 0.2, 0.16, 0.18);
+                    this.playTone(base * 2, 'triangle', 0.3, 0.26, 0.2);
+                }
+            },
+            mismatch() {
+                this.playTone(230, 'sawtooth', 0.14, 0, 0.08);
+                this.playTone(175, 'sawtooth', 0.2, 0.11, 0.08);
+            },
+            tick() { this.playTone(820, 'sine', 0.035, 0, 0.04); },
+            timeout() {
+                this.playTone(290, 'square', 0.14, 0, 0.09);
+                this.playTone(200, 'square', 0.25, 0.14, 0.09);
+            },
+            victory() {
+                [523, 659, 783, 1046].forEach((f, idx) => this.playTone(f, 'triangle', 0.22, idx * 0.1, 0.15));
+            }
+        };
+
+        /* ==========================================================
+           3. CONFETTI ENGINE
+        ========================================================== */
+        const confettiFX = {
+            particles: [],
+            animId: null,
+            burst(count = 65) {
+                const canvas = document.getElementById('fxCanvas');
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+                const colors = ['#00f5d4', '#6366f1', '#ec4899', '#f59e0b', '#10b981', '#ffffff'];
+                for (let i = 0; i < count; i++) {
+                    this.particles.push({
+                        x: canvas.width / 2,
+                        y: canvas.height / 2,
+                        vx: (Math.random() - 0.5) * 18,
+                        vy: (Math.random() - 0.7) * 18,
+                        size: Math.random() * 8 + 4,
+                        color: colors[Math.floor(Math.random() * colors.length)],
+                        rot: Math.random() * 360,
+                        vRot: (Math.random() - 0.5) * 12,
+                        life: 1
+                    });
+                }
+                if (!this.animId) this.loop(canvas, ctx);
+            },
+            loop(canvas, ctx) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                for (let i = this.particles.length - 1; i >= 0; i--) {
+                    const p = this.particles[i];
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.vy += 0.38;
+                    p.rot += p.vRot;
+                    p.life -= 0.015;
+                    if (p.life <= 0) {
+                        this.particles.splice(i, 1);
+                        continue;
+                    }
+                    ctx.save();
+                    ctx.translate(p.x, p.y);
+                    ctx.rotate((p.rot * Math.PI) / 180);
+                    ctx.globalAlpha = Math.max(p.life, 0);
+                    ctx.fillStyle = p.color;
+                    ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+                    ctx.restore();
+                }
+                if (this.particles.length > 0) {
+                    this.animId = requestAnimationFrame(() => this.loop(canvas, ctx));
+                } else {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    this.animId = null;
+                }
+            }
+        };
+
+        /* ==========================================================
+           4. MULTIPLAYER & GAME CONTROLLER
+        ========================================================== */
+        const app = {
+            myId: 'p_' + Math.random().toString(36).substring(2, 9),
+            myName: '',
+            myAvatar: '🦊',
+            myConsecutiveWins: 0,
+
+            isHost: false,
+            roomCode: '',
+            peer: null,
+            hostConn: null,
+            guestConns: {},
+            bcChannel: null,
+
+            state: null,
+            timerInterval: null,
+            botTimeout: null,
+            lastAnnouncedStreakKey: '',
+            lastRenderedGridKey: '',
+
+            init() {
+                const params = new URLSearchParams(window.location.search);
+                const invitedRoom = params.get('room');
+                if (invitedRoom) {
+                    document.getElementById('inputJoinCode').value = invitedRoom.toUpperCase();
+                    this.showToast(`Room Code "${invitedRoom.toUpperCase()}" ready! Enter your name to Join or Spectate.`, 'info');
+                }
+            },
+
+            selectAvatar(emoji) {
+                this.myAvatar = emoji;
+                document.querySelectorAll('.avatar-btn').forEach(btn => {
+                    btn.className = btn.textContent === emoji
+                        ? 'avatar-btn w-8 h-8 rounded-lg text-base flex items-center justify-center bg-indigo-600/30 border border-indigo-400'
+                        : 'avatar-btn w-8 h-8 rounded-lg text-base flex items-center justify-center hover:bg-slate-800';
+                });
+                soundFX.flip();
+            },
+
+            validatePlayerName() {
+                const input = document.getElementById('inputNickname');
+                const val = input.value.trim();
+                if (!val) {
+                    this.showToast('Please enter your Nickname first!', 'error');
+                    input.focus();
+                    return false;
+                }
+                this.myName = val.substring(0, 16);
+                return true;
+            },
+
+            createPlayerObject(id, name, avatar, isHost, isBot, index, role = 'player') {
+                return {
+                    id,
+                    name,
+                    avatar,
+                    isHost,
+                    isBot,
+                    role, // 'player' | 'spectator'
+                    team: index % 2 === 0 ? 'Alpha' : 'Bravo',
+                    score: 0,
+                    streak: 0,
+                    bestStreak: 0,
+                    afkCount: 0,
+                    kicked: false,
+                    online: true,
+                    consecutiveWins: id === this.myId ? this.myConsecutiveWins : 0
+                };
+            },
+
+            parseModeString(modeStr) {
+                const map = {
+                    'ffa-2': { isTeam: false, maxPlayers: 2, label: 'FFA (2P)' },
+                    'ffa-4': { isTeam: false, maxPlayers: 4, label: 'FFA (4P)' },
+                    'ffa-6': { isTeam: false, maxPlayers: 6, label: 'FFA (6P)' },
+                    'team-2v2': { isTeam: true, maxPlayers: 4, label: '2 vs 2' },
+                    'team-3v3': { isTeam: true, maxPlayers: 6, label: '3 vs 3' },
+                    'team-4v4': { isTeam: true, maxPlayers: 8, label: '4 vs 4' }
+                };
+                return map[modeStr] || map['ffa-4'];
+            },
+
+            /* ----------------------------------------------------------
+               ROOM CREATION & JOINING (WITH LIVE SPECTATOR SUPPORT)
+            ---------------------------------------------------------- */
+            createRoom() {
+                if (!this.validatePlayerName()) return;
+                const modeVal = document.getElementById('createModeSelect').value;
+                const categoryVal = document.getElementById('createCategorySelect').value;
+                const gridSize = parseInt(document.getElementById('createGridSizeSelect').value, 10);
+
+                const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+                let code = '';
+                for (let i = 0; i < 6; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
+
+                this.isHost = true;
+                this.roomCode = code;
+                const modeInfo = this.parseModeString(modeVal);
+
+                this.state = {
+                    roomCode: code,
+                    hostId: this.myId,
+                    status: 'lobby', // 'lobby' | 'playing' | 'finished'
+                    mode: modeVal,
+                    isTeamMode: modeInfo.isTeam,
+                    maxPlayers: modeInfo.maxPlayers,
+                    category: categoryVal,
+                    gridDim: gridSize,
+                    deckSize: gridSize * gridSize,
+                    players: [
+                        this.createPlayerObject(this.myId, this.myName, this.myAvatar, true, false, 0, 'player')
+                    ],
+                    spectators: [],
+                    cards: [],
+                    turnIndex: 0,
+                    turnPhase: 'WAIT_FIRST',
+                    timerRemaining: 30,
+                    timerTotal: 30,
+                    flippedIndices: [],
+                    teamScores: { Alpha: 0, Bravo: 0 },
+                    chat: [
+                        { id: Date.now(), sender: 'SYSTEM', text: `Squad Room ${code} created by ${this.myName}.`, type: 'system' }
+                    ],
+                    lastStreakEvent: null
+                };
+
+                this.setupNetworking(code, true);
+                this.switchView('viewRoom');
+                this.renderRoomUI();
+            },
+
+            joinRoomByInput() {
+                if (!this.validatePlayerName()) return;
+                const codeInput = document.getElementById('inputJoinCode').value.trim().toUpperCase();
+                if (!codeInput || codeInput.length < 3) {
+                    this.showToast('Please enter a valid Room Code!', 'error');
+                    return;
+                }
+                this.isHost = false;
+                this.roomCode = codeInput;
+                this.showToast(`Connecting to Room ${codeInput}...`, 'info');
+                this.setupNetworking(codeInput, false);
+            },
+
+            /* ----------------------------------------------------------
+               NETWORKING: PEERJS + BROADCASTCHANNEL
+            ---------------------------------------------------------- */
+            setupNetworking(code, asHost) {
+                this.cleanupNetworking();
+
+                try {
+                    this.bcChannel = new BroadcastChannel('kart_room_' + code);
+                    this.bcChannel.onmessage = (ev) => this.handleNetworkMessage(ev.data, null);
+                } catch (e) {}
+
+                const peerId = asHost ? `kartgame-room-${code}` : `kartgame-guest-${this.myId}-${Math.floor(Math.random()*999)}`;
+                try {
+                    this.peer = new Peer(peerId, { debug: 0 });
+                    this.peer.on('open', () => {
+                        if (!asHost) {
+                            const conn = this.peer.connect(`kartgame-room-${code}`, { reliable: true });
+                            this.hostConn = conn;
+                            conn.on('open', () => {
+                                this.sendToHost({
+                                    type: 'JOIN_REQUEST',
+                                    player: {
+                                        id: this.myId,
+                                        name: this.myName,
+                                        avatar: this.myAvatar,
+                                        consecutiveWins: this.myConsecutiveWins
+                                    }
+                                });
+                            });
+                            conn.on('data', (data) => this.handleNetworkMessage(data, conn));
+                            conn.on('close', () => this.showToast('Host disconnected.', 'error'));
+                        }
+                    });
+
+                    if (asHost) {
+                        this.peer.on('connection', (conn) => {
+                            conn.on('data', (data) => this.handleNetworkMessage(data, conn));
+                            conn.on('close', () => {
+                                const pId = conn._playerId;
+                                if (pId && this.state) {
+                                    this.hostHandlePlayerDeparture(pId, 'disconnected');
+                                }
+                            });
+                        });
+                    }
+
+                    this.peer.on('error', () => {
+                        if (!asHost) {
+                            this.sendToHost({
+                                type: 'JOIN_REQUEST',
+                                player: {
+                                    id: this.myId,
+                                    name: this.myName,
+                                    avatar: this.myAvatar,
+                                    consecutiveWins: this.myConsecutiveWins
+                                }
+                            });
+                        }
+                    });
+                } catch (e) {}
+
+                if (!asHost) {
+                    setTimeout(() => {
+                        if (!this.state) {
+                            this.sendToHost({
+                                type: 'JOIN_REQUEST',
+                                player: {
+                                    id: this.myId,
+                                    name: this.myName,
+                                    avatar: this.myAvatar,
+                                    consecutiveWins: this.myConsecutiveWins
+                                }
+                            });
+                        }
+                    }, 250);
+                }
+            },
+
+            cleanupNetworking() {
+                if (this.timerInterval) clearInterval(this.timerInterval);
+                if (this.botTimeout) clearTimeout(this.botTimeout);
+                if (this.bcChannel) {
+                    this.bcChannel.close();
+                    this.bcChannel = null;
+                }
+                if (this.peer) {
+                    this.peer.destroy();
+                    this.peer = null;
+                }
+                this.guestConns = {};
+                this.hostConn = null;
+            },
+
+            sendToHost(payload) {
+                if (this.isHost) {
+                    this.handleNetworkMessage(payload, null);
+                    return;
+                }
+                if (this.hostConn && this.hostConn.open) this.hostConn.send(payload);
+                if (this.bcChannel) this.bcChannel.postMessage(payload);
+            },
+
+            broadcastState() {
+                if (!this.isHost || !this.state) return;
+                const packet = { type: 'STATE_SYNC', state: this.state };
+                Object.values(this.guestConns).forEach(conn => {
+                    if (conn && conn.open) conn.send(packet);
+                });
+                if (this.bcChannel) this.bcChannel.postMessage(packet);
+                this.renderRoomUI();
+            },
+
+            handleNetworkMessage(msg, conn) {
+                if (!msg || !msg.type) return;
+
+                if (this.isHost) {
+                    if (msg.type === 'JOIN_REQUEST') {
+                        const incoming = msg.player;
+                        if (conn) {
+                            conn._playerId = incoming.id;
+                            this.guestConns[incoming.id] = conn;
+                        }
+
+                        // Check if already in players or spectators
+                        const existingPlayer = this.state.players.find(p => p.id === incoming.id);
+                        if (existingPlayer) {
+                            if (existingPlayer.kicked) {
+                                this.sendDirectOrBC(conn, { type: 'KICKED_NOTICE', reason: 'You were kicked from this room.' }, incoming.id);
+                                return;
+                            }
+                            existingPlayer.online = true;
+                            this.broadcastState();
+                            return;
+                        }
+                        const existingSpec = this.state.spectators.find(s => s.id === incoming.id);
+                        if (existingSpec) {
+                            this.broadcastState();
+                            return;
+                        }
+
+                        // IF MATCH IS ALREADY IN PROGRESS OR SQUAD IS FULL -> ADMIT AS LIVE SPECTATOR!
+                        const activeSquadCount = this.state.players.filter(p => !p.kicked).length;
+                        if (this.state.status === 'playing' || activeSquadCount >= this.state.maxPlayers) {
+                            const specObj = this.createPlayerObject(
+                                incoming.id,
+                                incoming.name,
+                                incoming.avatar,
+                                false,
+                                false,
+                                this.state.players.length,
+                                'spectator'
+                            );
+                            this.state.spectators.push(specObj);
+                            this.addSystemChat(`👁️ ${incoming.name} joined as a Live Spectator!`);
+                            this.broadcastState();
+                            return;
+                        }
+
+                        // Otherwise admit directly into Squad Lobby
+                        const newPlayer = this.createPlayerObject(
+                            incoming.id,
+                            incoming.name,
+                            incoming.avatar,
+                            false,
+                            false,
+                            this.state.players.length,
+                            'player'
+                        );
+                        newPlayer.consecutiveWins = incoming.consecutiveWins || 0;
+                        this.state.players.push(newPlayer);
+                        this.addSystemChat(`👋 ${incoming.name} joined the squad!`);
+                        this.broadcastState();
+                    }
+
+                    else if (msg.type === 'FLIP_CARD') {
+                        this.hostProcessCardFlip(msg.playerId, msg.cardIndex);
+                    }
+                    else if (msg.type === 'CHAT_MSG') {
+                        this.hostProcessChatMessage(msg.playerId, msg.text);
+                    }
+                    else if (msg.type === 'SWITCH_TEAM') {
+                        if (this.state.status === 'lobby') {
+                            const p = this.state.players.find(x => x.id === msg.playerId);
+                            if (p) {
+                                p.team = p.team === 'Alpha' ? 'Bravo' : 'Alpha';
+                                this.broadcastState();
+                            }
+                        }
+                    }
+                    else if (msg.type === 'LEAVE_ROOM') {
+                        this.hostHandlePlayerDeparture(msg.playerId, 'left the room');
+                    }
+                }
+                else {
+                    if (msg.type === 'KICKED_NOTICE' && msg.targetId === this.myId) {
+                        this.cleanupNetworking();
+                        this.state = null;
+                        document.getElementById('lockedTitle').textContent = 'Removed from Room';
+                        document.getElementById('lockedMessage').textContent = msg.reason || 'The Room Host removed you from the squad.';
+                        this.switchView('viewLocked');
+                        return;
+                    }
+                    else if (msg.type === 'STATE_SYNC') {
+                        this.state = msg.state;
+                        const mePlayer = this.state.players.find(p => p.id === this.myId);
+                        if (mePlayer && mePlayer.kicked) {
+                            this.cleanupNetworking();
+                            this.state = null;
+                            document.getElementById('lockedTitle').textContent = 'Removed from Room';
+                            document.getElementById('lockedMessage').textContent = 'You were removed by the Host or due to 3 AFK turn timeouts.';
+                            this.switchView('viewLocked');
+                            return;
+                        }
+                        if (document.getElementById('viewRoom').classList.contains('hidden')) {
+                            this.switchView('viewRoom');
+                        }
+                        this.renderRoomUI();
+                    }
+                }
+            },
+
+            sendDirectOrBC(conn, payload, targetId) {
+                payload.targetId = targetId;
+                if (conn && conn.open) conn.send(payload);
+                if (this.bcChannel) this.bcChannel.postMessage(payload);
+            },
+
+            /* ----------------------------------------------------------
+               HOST KICK ANYTIME & VOLUNTARY LEAVE HANDLING
+            ---------------------------------------------------------- */
+            hostKickUser(targetId) {
+                if (!this.isHost || !this.state || targetId === this.myId) return;
+
+                // Check spectators first
+                const specIdx = this.state.spectators.findIndex(s => s.id === targetId);
+                if (specIdx !== -1) {
+                    const spec = this.state.spectators[specIdx];
+                    this.state.spectators.splice(specIdx, 1);
+                    this.addSystemChat(`🚫 Spectator ${spec.name} was kicked by the Host.`);
+                    this.sendDirectOrBC(this.guestConns[targetId], { type: 'KICKED_NOTICE', reason: 'You were kicked from the room by the Host.' }, targetId);
+                    this.broadcastState();
+                    return;
+                }
+
+                // Check active squad players
+                const pIdx = this.state.players.findIndex(p => p.id === targetId);
+                if (pIdx !== -1) {
+                    const p = this.state.players[pIdx];
+                    this.addSystemChat(`🚫 ${p.name} was kicked by the Host.`);
+                    this.sendDirectOrBC(this.guestConns[targetId], { type: 'KICKED_NOTICE', reason: 'You were kicked from the squad by the Host.' }, targetId);
+
+                    if (this.state.status === 'lobby') {
+                        this.state.players.splice(pIdx, 1);
+                    } else {
+                        p.kicked = true;
+                        // If it was this kicked player's turn right now, clean up any half-flipped card and pass turn!
+                        if (this.state.turnIndex === pIdx && this.state.status === 'playing') {
+                            this.cleanupPendingFlips();
+                            const remaining = this.state.players.filter(x => !x.kicked);
+                            if (remaining.length < 1) {
+                                this.finishMatch();
+                                return;
+                            }
+                            this.advanceToNextPlayer();
+                            return;
+                        }
+                    }
+                    this.broadcastState();
+                }
+            },
+
+            hostHandlePlayerDeparture(playerId, reasonText = 'left') {
+                if (!this.isHost || !this.state) return;
+
+                const specIdx = this.state.spectators.findIndex(s => s.id === playerId);
+                if (specIdx !== -1) {
+                    const s = this.state.spectators[specIdx];
+                    this.state.spectators.splice(specIdx, 1);
+                    this.addSystemChat(`👋 Spectator ${s.name} ${reasonText}.`);
+                    this.broadcastState();
+                    return;
+                }
+
+                const pIdx = this.state.players.findIndex(p => p.id === playerId);
+                if (pIdx !== -1) {
+                    const p = this.state.players[pIdx];
+                    this.addSystemChat(`👋 ${p.name} ${reasonText}.`);
+                    if (this.state.status === 'lobby') {
+                        this.state.players.splice(pIdx, 1);
+                    } else {
+                        p.kicked = true;
+                        if (this.state.turnIndex === pIdx && this.state.status === 'playing') {
+                            this.cleanupPendingFlips();
+                            const remaining = this.state.players.filter(x => !x.kicked);
+                            if (remaining.length < 1) {
+                                this.finishMatch();
+                                return;
+                            }
+                            this.advanceToNextPlayer();
+                            return;
+                        }
+                    }
+                    this.broadcastState();
+                }
+            },
+
+            cleanupPendingFlips() {
+                if (!this.state) return;
+                this.state.flippedIndices.forEach(idx => {
+                    if (this.state.cards[idx] && !this.state.cards[idx].matched) {
+                        this.state.cards[idx].flipped = false;
+                        this.state.cards[idx].mismatch = false;
+                    }
+                });
+                this.state.flippedIndices = [];
+            },
+
+            /* ----------------------------------------------------------
+               LOBBY SETTINGS & BOT FILLING
+            ---------------------------------------------------------- */
+            hostUpdateSettings() {
+                if (!this.isHost || !this.state || this.state.status !== 'lobby') return;
+                const modeVal = document.getElementById('lobbyModeSelect').value;
+                const categoryVal = document.getElementById('lobbyCategorySelect').value;
+                const gridDim = parseInt(document.getElementById('lobbyGridSizeSelect').value, 10);
+
+                const modeInfo = this.parseModeString(modeVal);
+                this.state.mode = modeVal;
+                this.state.isTeamMode = modeInfo.isTeam;
+                this.state.maxPlayers = modeInfo.maxPlayers;
+                this.state.category = categoryVal;
+                this.state.gridDim = gridDim;
+                this.state.deckSize = gridDim * gridDim;
+
+                this.state.players.forEach((p, idx) => {
+                    p.team = idx % 2 === 0 ? 'Alpha' : 'Bravo';
+                });
+                this.broadcastState();
+            },
+
+            hostAddBot() {
+                if (!this.isHost || !this.state || this.state.status !== 'lobby') return;
+                if (this.state.players.length >= this.state.maxPlayers) {
+                    this.showToast(`Max squad capacity (${this.state.maxPlayers}) reached!`, 'info');
+                    return;
+                }
+                const botNames = ['Bot Alex', 'Bot Sara', 'Bot Omar', 'Bot Lina', 'Bot Zayd', 'Bot Maya', 'Bot Ryan'];
+                const botAvatars = ['🤖', '👾', '🦊', '🐯', '🐼', '🦁', '🐸'];
+                const idx = this.state.players.length;
+                const bot = this.createPlayerObject(
+                    'bot_' + Date.now() + '_' + idx,
+                    botNames[idx % botNames.length],
+                    botAvatars[idx % botAvatars.length],
+                    false,
+                    true,
+                    idx,
+                    'player'
+                );
+                this.state.players.push(bot);
+                this.addSystemChat(`🤖 ${bot.name} joined the squad.`);
+                this.broadcastState();
+            },
+
+            toggleMyTeam() {
+                if (!this.state || this.state.status !== 'lobby') return;
+                this.sendToHost({ type: 'SWITCH_TEAM', playerId: this.myId });
+            },
+
+            /* ----------------------------------------------------------
+               START MATCH & BUILD N×N SQUARE DECK
+            ---------------------------------------------------------- */
+            hostStartGame() {
+                if (!this.isHost || !this.state) return;
+
+                // Promote any waiting spectators if squad has open slots
+                this.promoteSpectatorsToSquad();
+
+                const activePlayers = this.state.players.filter(p => !p.kicked);
+                if (activePlayers.length < 2) {
+                    this.showToast('Need at least 2 players in the squad! Invite a friend or click "+ Add AI Player".', 'error');
+                    return;
+                }
+
+                this.state.status = 'playing';
+                this.state.teamScores = { Alpha: 0, Bravo: 0 };
+                this.state.flippedIndices = [];
+                this.state.turnIndex = this.state.players.findIndex(p => !p.kicked);
+                if (this.state.turnIndex === -1) this.state.turnIndex = 0;
+                this.state.lastStreakEvent = null;
+
+                this.state.players.forEach(p => {
+                    p.score = 0;
+                    p.streak = 0;
+                    p.bestStreak = 0;
+                    p.afkCount = 0;
+                });
+
+                const numPairs = (this.state.gridDim * this.state.gridDim) / 2;
+                const pairTemplates = generateDeckPairs(this.state.category, numPairs);
+
+                const deck = [];
+                pairTemplates.forEach(item => {
+                    deck.push({ ...item, flipped: false, matched: false, matchedBy: null, mismatch: false });
+                    deck.push({ ...item, flipped: false, matched: false, matchedBy: null, mismatch: false });
+                });
+
+                // Fisher-Yates Shuffle
+                for (let i = deck.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [deck[i], deck[j]] = [deck[j], deck[i]];
+                }
+
+                this.state.cards = deck;
+                this.lastRenderedGridKey = '';
+                this.addSystemChat(`🎮 ${this.state.gridDim}×${this.state.gridDim} Match Started (${deck.length} Cards)! First turn: ${this.state.players[this.state.turnIndex].name}.`);
+
+                this.startTurnPhase('WAIT_FIRST');
+                this.broadcastState();
+            },
+
+            promoteSpectatorsToSquad() {
+                if (!this.isHost || !this.state) return;
+                // Remove kicked non-host players first so squad stays clean
+                this.state.players = this.state.players.filter(p => !p.kicked);
+
+                while (this.state.spectators.length > 0 && this.state.players.length < this.state.maxPlayers) {
+                    const spec = this.state.spectators.shift();
+                    spec.role = 'player';
+                    spec.kicked = false;
+                    spec.afkCount = 0;
+                    spec.score = 0;
+                    spec.team = this.state.players.length % 2 === 0 ? 'Alpha' : 'Bravo';
+                    this.state.players.push(spec);
+                    this.addSystemChat(`✅ Spectator ${spec.name} promoted to Active Squad!`);
+                }
+            },
+
+            /* ----------------------------------------------------------
+               TIMERS (30s TURN / 10s 2ND CARD) & 3-AFK AUTO-KICK
+            ---------------------------------------------------------- */
+            startTurnPhase(phase) {
+                if (!this.isHost || !this.state || this.state.status !== 'playing') return;
+                if (this.timerInterval) clearInterval(this.timerInterval);
+                if (this.botTimeout) clearTimeout(this.botTimeout);
+
+                this.state.turnPhase = phase;
+                this.state.timerTotal = phase === 'WAIT_FIRST' ? 30 : 10;
+                this.state.timerRemaining = this.state.timerTotal;
+
+                const currentPlayer = this.state.players[this.state.turnIndex];
+                if (currentPlayer && currentPlayer.isBot && !currentPlayer.kicked) {
+                    const delay = phase === 'WAIT_FIRST' ? 1050 : 850;
+                    this.botTimeout = setTimeout(() => this.executeBotMove(), delay);
+                }
+
+                this.timerInterval = setInterval(() => {
+                    if (!this.state || this.state.status !== 'playing') {
+                        clearInterval(this.timerInterval);
+                        return;
+                    }
+                    if (this.state.turnPhase === 'RESOLVING') return;
+
+                    this.state.timerRemaining -= 1;
+                    if (this.state.timerRemaining <= 0) {
+                        this.handleTurnTimeout();
+                    } else {
+                        this.broadcastState();
+                    }
+                }, 1000);
+            },
+
+            handleTurnTimeout() {
+                if (!this.isHost || !this.state) return;
+                const currentPlayer = this.state.players[this.state.turnIndex];
+                if (!currentPlayer) return;
+
+                soundFX.timeout();
+
+                if (this.state.turnPhase === 'WAIT_FIRST') {
+                    currentPlayer.afkCount += 1;
+                    currentPlayer.streak = 0;
+
+                    if (currentPlayer.afkCount >= 3) {
+                        currentPlayer.kicked = true;
+                        this.addSystemChat(`🚫 ${currentPlayer.name} was KICKED (3 AFK turn timeouts)!`);
+                    } else {
+                        this.addSystemChat(`⏰ 30s Timeout! ${currentPlayer.name} missed turn (AFK ${currentPlayer.afkCount}/3).`);
+                    }
+
+                    const remaining = this.state.players.filter(p => !p.kicked);
+                    if (remaining.length === 0) {
+                        this.finishMatch();
+                        return;
+                    }
+                    this.advanceToNextPlayer();
+                }
+                else if (this.state.turnPhase === 'WAIT_SECOND') {
+                    this.cleanupPendingFlips();
+                    currentPlayer.streak = 0;
+                    this.addSystemChat(`⏱️ 10s Cooldown expired! ${currentPlayer.name} didn't pick 2nd card. Card flipped back!`);
+                    this.advanceToNextPlayer();
+                }
+            },
+
+            advanceToNextPlayer() {
+                if (!this.isHost || !this.state) return;
+                const total = this.state.players.length;
+                let nextIdx = this.state.turnIndex;
+                for (let i = 0; i < total; i++) {
+                    nextIdx = (nextIdx + 1) % total;
+                    if (!this.state.players[nextIdx].kicked) {
+                        this.state.turnIndex = nextIdx;
+                        break;
+                    }
+                }
+                this.startTurnPhase('WAIT_FIRST');
+                this.broadcastState();
+            },
+
+            /* ----------------------------------------------------------
+               3D CARD FLIPPING & 3-STREAK +2 BONUS POINTS LOGIC
+            ---------------------------------------------------------- */
+            onCardClick(cardIndex) {
+                if (!this.state || this.state.status !== 'playing') return;
+
+                // Check if user is a spectator
+                const isSpectator = this.state.spectators.some(s => s.id === this.myId);
+                if (isSpectator) {
+                    this.showToast('Spectator Mode: You are watching live and will play in the next round!', 'info');
+                    return;
+                }
+
+                const currentPlayer = this.state.players[this.state.turnIndex];
+                if (!currentPlayer || currentPlayer.id !== this.myId) {
+                    this.showToast("Wait for your turn!", 'info');
+                    return;
+                }
+                if (this.state.turnPhase === 'RESOLVING') return;
+
+                const card = this.state.cards[cardIndex];
+                if (!card || card.flipped || card.matched) return;
+
+                this.sendToHost({
+                    type: 'FLIP_CARD',
+                    playerId: this.myId,
+                    cardIndex: cardIndex
+                });
+            },
+
+            hostProcessCardFlip(playerId, cardIndex) {
+                if (!this.isHost || !this.state || this.state.status !== 'playing') return;
+                const currentPlayer = this.state.players[this.state.turnIndex];
+                if (!currentPlayer || currentPlayer.id !== playerId || currentPlayer.kicked) return;
+                if (this.state.turnPhase === 'RESOLVING') return;
+
+                const card = this.state.cards[cardIndex];
+                if (!card || card.flipped || card.matched) return;
+
+                card.flipped = true;
+                this.state.flippedIndices.push(cardIndex);
+
+                if (this.state.flippedIndices.length === 1) {
+                    this.startTurnPhase('WAIT_SECOND');
+                    this.broadcastState();
+                    return;
+                }
+
+                if (this.state.flippedIndices.length === 2) {
+                    if (this.timerInterval) clearInterval(this.timerInterval);
+                    this.state.turnPhase = 'RESOLVING';
+
+                    const [idx1, idx2] = this.state.flippedIndices;
+                    const card1 = this.state.cards[idx1];
+                    const card2 = this.state.cards[idx2];
+
+                    if (card1.pairId === card2.pairId) {
+                        // MATCH!
+                        card1.matched = true;
+                        card2.matched = true;
+                        card1.matchedBy = currentPlayer.name;
+                        card2.matchedBy = currentPlayer.name;
+
+                        currentPlayer.streak += 1;
+                        if (currentPlayer.streak > currentPlayer.bestStreak) {
+                            currentPlayer.bestStreak = currentPlayer.streak;
+                        }
+
+                        // RULE: +1 Point per match, PLUS +2 Extra Bonus Points on every 3rd consecutive match (3, 6, 9...)!
+                        const isTripleBonus = currentPlayer.streak % 3 === 0;
+                        const pointsEarned = isTripleBonus ? 3 : 1; // 1 base + 2 bonus = 3
+                        currentPlayer.score += pointsEarned;
+
+                        if (this.state.isTeamMode) {
+                            this.state.teamScores[currentPlayer.team] = (this.state.teamScores[currentPlayer.team] || 0) + pointsEarned;
+                        }
+
+                        this.state.flippedIndices = [];
+
+                        if (currentPlayer.streak >= 2) {
+                            this.state.lastStreakEvent = {
+                                id: Date.now() + Math.random(),
+                                playerName: currentPlayer.name,
+                                streak: currentPlayer.streak,
+                                bonusAwarded: isTripleBonus ? 2 : 0
+                            };
+                            if (isTripleBonus) {
+                                this.addSystemChat(`🎁🔥 ${currentPlayer.name} hit ${currentPlayer.streak}x STREAK! Awarded +1 pt AND +2 BONUS POINTS (+3 total)!`);
+                            } else {
+                                this.addSystemChat(`🔥 ${currentPlayer.name} hit ${currentPlayer.streak}x Streak (+1 pt) & keeps turn!`);
+                            }
+                        } else {
+                            this.addSystemChat(`✅ ${currentPlayer.name} matched ${card1.icon} (+1 pt) & plays again!`);
+                        }
+
+                        this.broadcastState();
+
+                        const allMatched = this.state.cards.every(c => c.matched);
+                        if (allMatched) {
+                            setTimeout(() => this.finishMatch(), 850);
+                        } else {
+                            setTimeout(() => {
+                                this.startTurnPhase('WAIT_FIRST');
+                                this.broadcastState();
+                            }, 600);
+                        }
+                    } else {
+                        // MISMATCH -> Flip back after 1.15s
+                        card1.mismatch = true;
+                        card2.mismatch = true;
+                        currentPlayer.streak = 0;
+                        this.broadcastState();
+
+                        setTimeout(() => {
+                            if (!this.state) return;
+                            card1.flipped = false;
+                            card2.flipped = false;
+                            card1.mismatch = false;
+                            card2.mismatch = false;
+                            this.state.flippedIndices = [];
+                            this.advanceToNextPlayer();
+                        }, 1150);
+                    }
+                }
+            },
+
+            executeBotMove() {
+                if (!this.isHost || !this.state || this.state.status !== 'playing') return;
+                const currentPlayer = this.state.players[this.state.turnIndex];
+                if (!currentPlayer || !currentPlayer.isBot) return;
+
+                const available = [];
+                this.state.cards.forEach((c, idx) => {
+                    if (!c.flipped && !c.matched) available.push(idx);
+                });
+                if (available.length === 0) return;
+                const pick = available[Math.floor(Math.random() * available.length)];
+                this.hostProcessCardFlip(currentPlayer.id, pick);
+            },
+
+            /* ----------------------------------------------------------
+               FINISH MATCH & KEEP SQUAD PERSISTENT
+            ---------------------------------------------------------- */
+            finishMatch() {
+                if (!this.isHost || !this.state) return;
+                if (this.timerInterval) clearInterval(this.timerInterval);
+
+                this.state.status = 'finished';
+
+                const sorted = [...this.state.players].sort((a, b) => {
+                    if (b.score !== a.score) return b.score - a.score;
+                    return b.bestStreak - a.bestStreak;
+                });
+
+                const winner = sorted[0];
+                if (winner) {
+                    winner.consecutiveWins = (winner.consecutiveWins || 0) + 1;
+                    sorted.slice(1).forEach(p => {
+                        if (p.score < winner.score) p.consecutiveWins = 0;
+                    });
+                    this.addSystemChat(`🏆 Round Complete! Winner: ${winner.name} (${winner.score} pts). Squad remains open!`);
+                }
+
+                // Automatically promote spectators into active squad for next round
+                this.promoteSpectatorsToSquad();
+                this.broadcastState();
+            },
+
+            hostBackToLobby() {
+                if (!this.isHost || !this.state) {
+                    this.showToast('Only the Room Host can return the squad to the Lobby settings.', 'info');
+                    return;
+                }
+                this.promoteSpectatorsToSquad();
+                this.state.status = 'lobby';
+                this.broadcastState();
+            },
+
+            hostRematch() {
+                if (!this.isHost) {
+                    this.showToast('Waiting for Room Host to start the next round...', 'info');
+                    return;
+                }
+                this.hostStartGame();
+            },
+
+            /* ----------------------------------------------------------
+               CHAT & REACTIONS
+            ---------------------------------------------------------- */
+            handleChatSubmit(e) {
+                e.preventDefault();
+                const input = document.getElementById('inputChatMessage');
+                const text = input.value.trim();
+                if (!text || !this.state) return;
+                input.value = '';
+                this.sendToHost({ type: 'CHAT_MSG', playerId: this.myId, text: text.substring(0, 140) });
+            },
+
+            sendQuickReaction(emoji) {
+                if (!this.state) return;
+                this.sendToHost({ type: 'CHAT_MSG', playerId: this.myId, text: emoji });
+            },
+
+            hostProcessChatMessage(playerId, text) {
+                if (!this.isHost || !this.state) return;
+                const sender = this.state.players.find(p => p.id === playerId) || this.state.spectators.find(s => s.id === playerId);
+                if (!sender) return;
+                const tag = sender.role === 'spectator' ? '👁️ ' : '';
+                this.state.chat.push({
+                    id: Date.now() + Math.random(),
+                    sender: `${tag}${sender.avatar} ${sender.name}`,
+                    senderId: sender.id,
+                    text,
+                    type: 'user'
+                });
+                if (this.state.chat.length > 60) this.state.chat.shift();
+                this.broadcastState();
+            },
+
+            addSystemChat(text) {
+                if (!this.state) return;
+                this.state.chat.push({ id: Date.now() + Math.random(), sender: 'SYSTEM', text, type: 'system' });
+                if (this.state.chat.length > 60) this.state.chat.shift();
+            },
+
+            toggleMobileChat(force) {
+                const sidebar = document.getElementById('chatSidebar');
+                const isClosed = sidebar.classList.contains('translate-x-full');
+                const openIt = typeof force === 'boolean' ? force : isClosed;
+                if (openIt) {
+                    sidebar.classList.remove('translate-x-full');
+                    document.getElementById('chatUnreadDot').classList.add('hidden');
+                } else {
+                    sidebar.classList.add('translate-x-full');
+                }
+            },
+
+            /* ----------------------------------------------------------
+               UI RENDERING (OPTIMIZED DOM DIFFING FOR SMOOTH 3D FLIPS)
+            ---------------------------------------------------------- */
+            switchView(viewId) {
+                ['viewHome', 'viewLocked', 'viewRoom'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (id === viewId) {
+                        el.classList.remove('hidden');
+                        el.classList.add('flex');
+                    } else {
+                        el.classList.add('hidden');
+                        el.classList.remove('flex');
+                    }
+                });
+                const headerBar = document.getElementById('headerRoomBar');
+                if (viewId === 'viewRoom') {
+                    headerBar.classList.remove('hidden');
+                    headerBar.classList.add('flex');
+                } else {
+                    headerBar.classList.add('hidden');
+                    headerBar.classList.remove('flex');
+                }
+            },
+
+            renderRoomUI() {
+                if (!this.state) return;
+                const st = this.state;
+
+                document.getElementById('displayRoomCode').textContent = st.roomCode;
+
+                // Spectator Banner check
+                const amISpectator = st.spectators.some(s => s.id === this.myId);
+                const specBanner = document.getElementById('spectatorBanner');
+                if (amISpectator) {
+                    specBanner.classList.remove('hidden');
+                    specBanner.classList.add('flex');
+                } else {
+                    specBanner.classList.add('hidden');
+                    specBanner.classList.remove('flex');
+                }
+
+                // Spectators Sidebar List & Host Kick Spectator Control
+                document.getElementById('spectatorCountBadge').textContent = `👁️ ${st.spectators.length} Watching`;
+                const specContainer = document.getElementById('spectatorsListContainer');
+                if (st.spectators.length > 0) {
+                    specContainer.classList.remove('hidden');
+                    document.getElementById('spectatorsListItems').innerHTML = st.spectators.map(s => `
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-900 border border-amber-500/30 text-amber-200 text-[10px]">
+                            ${s.avatar} ${this.escapeHTML(s.name)}
+                            ${this.isHost ? `<button onclick="app.hostKickUser('${s.id}')" class="text-rose-400 hover:text-rose-200 ml-1" title="Kick Spectator"><i class="fa-solid fa-xmark"></i></button>` : ''}
+                        </span>
+                    `).join('');
+                } else {
+                    specContainer.classList.add('hidden');
+                }
+
+                // Toggle Sub-Views
+                const subLobby = document.getElementById('subviewLobby');
+                const subGame = document.getElementById('subviewGame');
+
+                if (st.status === 'lobby') {
+                    subLobby.classList.remove('hidden');
+                    subLobby.classList.add('flex');
+                    subGame.classList.add('hidden');
+                    subGame.classList.remove('flex');
+                    this.renderLobbyView(st);
+                } else {
+                    subLobby.classList.add('hidden');
+                    subLobby.classList.remove('flex');
+                    subGame.classList.remove('hidden');
+                    subGame.classList.add('flex');
+                    this.renderGameplayView(st);
+                }
+
+                this.renderChat(st.chat);
+
+                // Streak Celebration Overlay
+                if (st.lastStreakEvent && st.lastStreakEvent.id !== this.lastAnnouncedStreakKey) {
+                    this.lastAnnouncedStreakKey = st.lastStreakEvent.id;
+                    this.triggerStreakBanner(st.lastStreakEvent.playerName, st.lastStreakEvent.streak, st.lastStreakEvent.bonusAwarded);
+                } else if (st.flippedIndices && st.flippedIndices.length === 1) {
+                    soundFX.flip();
+                }
+
+                // Podium Modal
+                const modal = document.getElementById('podiumModal');
+                if (st.status === 'finished') {
+                    this.renderVictoryPodium(st);
+                } else {
+                    modal.classList.add('hidden');
+                    modal.classList.remove('flex');
+                }
+            },
+
+            renderLobbyView(st) {
+                const modeSel = document.getElementById('lobbyModeSelect');
+                const catSel = document.getElementById('lobbyCategorySelect');
+                const gridSel = document.getElementById('lobbyGridSizeSelect');
+
+                modeSel.value = st.mode;
+                catSel.value = st.category;
+                gridSel.value = String(st.gridDim);
+
+                modeSel.disabled = !this.isHost;
+                catSel.disabled = !this.isHost;
+                gridSel.disabled = !this.isHost;
+
+                document.getElementById('hostBotControls').style.display = this.isHost ? 'flex' : 'none';
+                document.getElementById('btnStartMatch').style.display = this.isHost ? 'flex' : 'none';
+
+                const activePlayers = st.players.filter(p => !p.kicked);
+                document.getElementById('lobbyPlayerCount').textContent = `${activePlayers.length}/${st.maxPlayers}`;
+
+                const grid = document.getElementById('lobbyPlayersGrid');
+                grid.innerHTML = activePlayers.map(p => {
+                    const teamBadge = st.isTeamMode
+                        ? `<button onclick="${p.id === this.myId ? 'app.toggleMyTeam()' : ''}" class="text-[10px] font-bold uppercase px-2 py-0.5 rounded ${p.team === 'Alpha' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'bg-pink-500/20 text-pink-300 border border-pink-500/40'}">
+                            Team ${p.team} ${p.id === this.myId ? '⇄' : ''}
+                           </button>`
+                        : '';
+                    return `
+                        <div class="glass-card rounded-2xl p-3 flex items-center justify-between border ${p.id === this.myId ? 'border-indigo-500/60' : 'border-slate-800'}">
+                            <div class="flex items-center gap-2.5 min-w-0">
+                                <div class="w-9 h-9 rounded-xl bg-slate-900 border border-slate-700 flex items-center justify-center text-lg shrink-0">
+                                    ${p.avatar}
+                                </div>
+                                <div class="min-w-0">
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="font-bold text-xs sm:text-sm text-white truncate">${this.escapeHTML(p.name)}</span>
+                                        ${p.isHost ? '<i class="fa-solid fa-crown text-amber-400 text-xs" title="Host"></i>' : ''}
+                                    </div>
+                                    <div class="flex items-center gap-2 mt-0.5">
+                                        ${teamBadge}
+                                        <span class="text-[10px] text-emerald-400 font-semibold">● In Squad</span>
+                                    </div>
+                                </div>
+                            </div>
+                            ${this.isHost && !p.isHost ? `
+                                <button onclick="app.hostKickUser('${p.id}')" class="px-2 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white text-[10px] font-bold transition" title="Kick Player">
+                                    Kick
+                                </button>
+                            ` : ''}
+                        </div>
+                    `;
+                }).join('');
+            },
+
+            renderGameplayView(st) {
+                const currentPlayer = st.players[st.turnIndex] || st.players[0];
+                const isMyTurn = currentPlayer && currentPlayer.id === this.myId;
+
+                document.getElementById('turnAvatar').textContent = currentPlayer ? currentPlayer.avatar : '🎴';
+                document.getElementById('turnPlayerName').textContent = isMyTurn
+                    ? `YOUR TURN (${currentPlayer.name})`
+                    : `${currentPlayer ? currentPlayer.name : 'Player'}'s Turn`;
+
+                const badgeLabel = document.getElementById('turnBadgeLabel');
+                if (isMyTurn) {
+                    badgeLabel.className = 'text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-teal-400 text-slate-950';
+                    badgeLabel.textContent = '⚡ PLAY NOW';
+                } else {
+                    badgeLabel.className = 'text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/40';
+                    badgeLabel.textContent = 'WATCHING';
+                }
+
+                const comboBadge = document.getElementById('turnComboBadge');
+                if (currentPlayer && currentPlayer.streak >= 2) {
+                    comboBadge.classList.remove('hidden');
+                    comboBadge.textContent = `🔥 ${currentPlayer.streak}x Streak`;
+                } else {
+                    comboBadge.classList.add('hidden');
+                }
+
+                // Pairs progress counter
+                const matchedCards = st.cards.filter(c => c.matched).length;
+                document.getElementById('matchedPairsCounter').textContent = `${matchedCards / 2}/${st.cards.length / 2} Pairs`;
+
+                // Timer UI
+                document.getElementById('timerPhaseLabel').textContent = st.turnPhase === 'WAIT_SECOND' ? '⚡ 2nd Card (10s)' : '1st Card (30s)';
+                document.getElementById('turnSubInstruction').textContent = st.turnPhase === 'WAIT_SECOND'
+                    ? (isMyTurn ? 'Pick 2nd matching card within 10s!' : `${currentPlayer.name} has 10s for 2nd card!`)
+                    : (isMyTurn ? 'Flip 1st card within 30s! (3x Streak = +2 Bonus Pts)' : `Waiting for ${currentPlayer.name} (30s)...`);
+
+                const timerBox = document.getElementById('timerNumberBox');
+                timerBox.textContent = `${st.timerRemaining}s`;
+                if (st.timerRemaining <= 5) {
+                    timerBox.className = 'w-11 h-9 rounded-lg bg-rose-950 border border-rose-500 flex items-center justify-center font-display font-black text-base sm:text-lg text-rose-400 animate-pulse';
+                    soundFX.tick();
+                } else {
+                    timerBox.className = 'w-11 h-9 rounded-lg bg-indigo-950 border border-indigo-500/50 flex items-center justify-center font-display font-black text-base sm:text-lg text-teal-300';
+                }
+
+                const pct = Math.max(0, Math.min(100, (st.timerRemaining / (st.timerTotal || 30)) * 100));
+                document.getElementById('timerProgressBar').style.width = `${pct}%`;
+
+                // Team Score
+                const teamBanner = document.getElementById('teamScoreBanner');
+                if (st.isTeamMode) {
+                    teamBanner.classList.remove('hidden');
+                    teamBanner.classList.add('flex');
+                    document.getElementById('teamAlphaScore').textContent = st.teamScores.Alpha || 0;
+                    document.getElementById('teamBravoScore').textContent = st.teamScores.Bravo || 0;
+                } else {
+                    teamBanner.classList.add('hidden');
+                    teamBanner.classList.remove('flex');
+                }
+
+                // Live Scoreboard Strip (All players' points + Host Kick button anytime)
+                const strip = document.getElementById('gamePlayersStrip');
+                strip.innerHTML = st.players.map((p, idx) => {
+                    const active = idx === st.turnIndex && !p.kicked;
+                    return `
+                        <div class="glass-card rounded-xl px-2.5 py-1.5 flex items-center gap-2 shrink-0 transition ${active ? 'active-turn-ring bg-indigo-950/90' : 'opacity-85'} ${p.kicked ? 'opacity-40 grayscale' : ''}">
+                            <span class="text-base">${p.avatar}</span>
+                            <div>
+                                <div class="flex items-center gap-1">
+                                    <span class="text-[11px] font-bold text-white max-w-[85px] truncate">${this.escapeHTML(p.name)}</span>
+                                    ${p.streak >= 2 ? `<span class="text-[9px] text-amber-300 font-black">🔥${p.streak}</span>` : ''}
+                                </div>
+                                <div class="text-[9px] ${p.kicked ? 'text-rose-400 font-bold' : 'text-slate-400'}">
+                                    ${p.kicked ? 'OUT' : (p.afkCount > 0 ? `AFK ${p.afkCount}/3` : (st.isTeamMode ? p.team : 'Playing'))}
+                                </div>
+                            </div>
+                            <div class="pl-1.5 border-l border-slate-700/80 text-right">
+                                <span class="font-display font-black text-sm text-teal-300">${p.score}</span>
+                                <span class="text-[8px] uppercase text-slate-400 block -mt-1">pts</span>
+                            </div>
+                            ${this.isHost && !p.isHost && !p.kicked ? `
+                                <button onclick="app.hostKickUser('${p.id}')" class="ml-1 w-5 h-5 rounded bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white text-[10px] flex items-center justify-center transition" title="Kick Player Now">
+                                    <i class="fa-solid fa-xmark"></i>
+                                </button>
+                            ` : ''}
+                        </div>
+                    `;
+                }).join('');
+
+                // RENDER OR UPDATE 1:1 SQUARE BOARD (Preserves DOM nodes so CSS 3D flip animates smoothly!)
+                this.renderSquareCardsGrid(st);
+            },
+
+            renderSquareCardsGrid(st) {
+                const board = document.getElementById('cardsBoardGrid');
+                const N = st.gridDim || Math.sqrt(st.cards.length) || 6;
+                const gridKey = `${st.roomCode}_${N}_${st.cards.length}`;
+
+                // Responsive sizing based on N (from 4x4 up to 20x20)
+                let gapPx = N >= 16 ? '2px' : (N >= 10 ? '3px' : '5px');
+                let radiusClass = N >= 16 ? 'rounded-[4px]' : (N >= 10 ? 'rounded-md' : 'rounded-xl');
+                let iconSizeStyle = N >= 20 ? 'clamp(9px, 1.8vmin, 16px)'
+                                  : N >= 16 ? 'clamp(11px, 2.2vmin, 20px)'
+                                  : N >= 12 ? 'clamp(13px, 2.8vmin, 24px)'
+                                  : N >= 10 ? 'clamp(15px, 3.4vmin, 28px)'
+                                  : N >= 8  ? 'clamp(18px, 4.2vmin, 34px)'
+                                  : 'clamp(22px, 5.5vmin, 44px)';
+
+                if (this.lastRenderedGridKey !== gridKey || board.children.length !== st.cards.length) {
+                    this.lastRenderedGridKey = gridKey;
+                    board.style.gridTemplateColumns = `repeat(${N}, minmax(0, 1fr))`;
+                    board.style.gridTemplateRows = `repeat(${N}, minmax(0, 1fr))`;
+                    board.style.gap = gapPx;
+
+                    board.innerHTML = st.cards.map((c, idx) => `
+                        <div id="card_el_${idx}" onclick="app.onCardClick(${idx})" class="MemoryCard cursor-pointer">
+                            <div class="card-inner">
+                                <div class="card-face card-back ${radiusClass}">
+                                    <span class="text-indigo-400/50 font-display font-bold" style="font-size: calc(${iconSizeStyle} * 0.55)">?</span>
+                                </div>
+                                <div class="card-face card-front ${radiusClass}" style="background: ${c.bg}; border-color: ${c.border};">
+                                    <span class="leading-none drop-shadow" style="font-size: ${iconSizeStyle}">${c.icon}</span>
+                                    ${c.variantTag ? `<span class="font-mono font-black text-white/90 leading-none mt-0.5" style="font-size: calc(${iconSizeStyle} * 0.38)">${c.variantTag}</span>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                }
+
+                // Update classes in-place so CSS 3D rotation (`rotateY(180deg)`) transitions smoothly!
+                st.cards.forEach((c, idx) => {
+                    const el = document.getElementById(`card_el_${idx}`);
+                    if (!el) return;
+                    el.classList.toggle('card-flipped', Boolean(c.flipped || c.matched));
+                    el.classList.toggle('card-matched', Boolean(c.matched));
+                    el.classList.toggle('card-mismatch', Boolean(c.mismatch));
+                });
+            },
+
+            triggerStreakBanner(playerName, streakCount, bonusAwarded) {
+                soundFX.match(streakCount);
+                confettiFX.burst(streakCount * 30);
+
+                const overlay = document.getElementById('streakOverlay');
+                const emoji = document.getElementById('streakEmoji');
+                const title = document.getElementById('streakTitle');
+                const bonusPill = document.getElementById('streakBonusPill');
+                const sub = document.getElementById('streakSubtitle');
+
+                if (bonusAwarded > 0) {
+                    emoji.textContent = '🎁🔥';
+                    title.textContent = `${streakCount}x STREAK SUPER BONUS!`;
+                    bonusPill.classList.remove('hidden');
+                    bonusPill.textContent = `🎁 +${bonusAwarded} EXTRA BONUS POINTS AWARDED!`;
+                } else {
+                    emoji.textContent = streakCount >= 4 ? '👑' : '🔥';
+                    title.textContent = `${streakCount}x MATCH COMBO!`;
+                    bonusPill.classList.add('hidden');
+                }
+                sub.textContent = `${playerName} keeps the turn!`;
+
+                overlay.classList.remove('hidden');
+                overlay.classList.add('flex');
+                setTimeout(() => {
+                    overlay.classList.add('hidden');
+                    overlay.classList.remove('flex');
+                }, 1850);
+            },
+
+            renderVictoryPodium(st) {
+                const modal = document.getElementById('podiumModal');
+                if (!modal.classList.contains('hidden')) return;
+
+                soundFX.victory();
+                confettiFX.burst(110);
+
+                const ranked = [...st.players].sort((a, b) => {
+                    if (b.score !== a.score) return b.score - a.score;
+                    return b.bestStreak - a.bestStreak;
+                });
+
+                const meRanked = ranked.find(p => p.id === this.myId);
+                if (meRanked) {
+                    this.myConsecutiveWins = meRanked.consecutiveWins || 0;
+                    document.getElementById('mySessionStats').textContent = `🏆 Win Streak: ${this.myConsecutiveWins}`;
+                }
+
+                const first = ranked[0];
+                const streakBanner = document.getElementById('winStreakCelebration');
+                if (first && first.consecutiveWins >= 2) {
+                    streakBanner.classList.remove('hidden');
+                    document.getElementById('winStreakText').textContent = `🔥 EPIC DYNASTY! ${first.name} HAS ${first.consecutiveWins} WINS IN A ROW! 👑`;
+                } else {
+                    streakBanner.classList.add('hidden');
+                }
+
+                const headline = document.getElementById('podiumHeadline');
+                if (st.isTeamMode) {
+                    const a = st.teamScores.Alpha || 0;
+                    const b = st.teamScores.Bravo || 0;
+                    headline.textContent = a > b ? '🔵 TEAM ALPHA WINS!' : (b > a ? '🔴 TEAM BRAVO WINS!' : '⚡ TIE MATCH!');
+                } else {
+                    headline.textContent = first ? `🏆 ${first.name} WINS!` : 'ROUND COMPLETE!';
+                }
+
+                const pillarHTML = (p, place, hClass, medal, borderClass) => {
+                    if (!p) return `<div class="flex flex-col items-center opacity-25"><div class="w-full ${hClass} rounded-t-2xl bg-slate-900 border border-slate-800"></div></div>`;
+                    return `
+                        <div class="flex flex-col items-center">
+                            <div class="text-2xl mb-0.5">${p.avatar}</div>
+                            <div class="font-bold text-xs text-white truncate max-w-[100px]">${this.escapeHTML(p.name)}</div>
+                            <div class="text-xs font-extrabold text-teal-300 mb-1">${p.score} pts</div>
+                            <div class="w-full ${hClass} rounded-t-2xl ${borderClass} flex flex-col items-center justify-center p-2 shadow-lg">
+                                <span class="text-xl">${medal}</span>
+                                <span class="text-[9px] font-black uppercase text-slate-200 mt-0.5">${place}</span>
+                            </div>
+                        </div>
+                    `;
+                };
+
+                document.getElementById('podiumPillars').innerHTML =
+                    pillarHTML(ranked[1], '2nd', 'h-20', '🥈', 'bg-slate-800/90 border-t-4 border-slate-300') +
+                    pillarHTML(ranked[0], '1st', 'h-28', '🥇', 'bg-gradient-to-b from-amber-500/30 to-indigo-950 border-t-4 border-amber-400') +
+                    pillarHTML(ranked[2], '3rd', 'h-16', '🥉', 'bg-amber-950/40 border-t-4 border-amber-600');
+
+                document.getElementById('podiumLeaderboardRows').innerHTML = ranked.map((p, idx) => `
+                    <div class="px-3 py-2 grid grid-cols-12 items-center ${p.id === this.myId ? 'bg-indigo-950/50' : ''}">
+                        <div class="col-span-1 font-bold text-slate-400">${idx + 1}</div>
+                        <div class="col-span-5 flex items-center gap-1.5 font-bold text-white truncate">
+                            <span>${p.avatar}</span>
+                            <span class="truncate">${this.escapeHTML(p.name)}</span>
+                        </div>
+                        <div class="col-span-2 text-center font-display font-black text-teal-300">${p.score}</div>
+                        <div class="col-span-2 text-center text-amber-300 font-semibold">🔥 ${p.bestStreak}x</div>
+                        <div class="col-span-2 text-right">
+                            ${this.isHost && !p.isHost ? `<button onclick="app.hostKickUser('${p.id}')" class="px-2 py-0.5 rounded bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white text-[10px] font-bold">Kick</button>` : `<span class="text-emerald-400 text-[10px]">Ready</span>`}
+                        </div>
+                    </div>
+                `).join('');
+
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+            },
+
+            renderChat(messages) {
+                const container = document.getElementById('chatMessagesList');
+                const shouldScroll = container.scrollTop + container.clientHeight >= container.scrollHeight - 60;
+
+                container.innerHTML = messages.map(m => {
+                    if (m.type === 'system') {
+                        return `<div class="px-2.5 py-1 rounded-lg bg-slate-900/90 border border-slate-800 text-[10px] text-indigo-300">${this.escapeHTML(m.text)}</div>`;
+                    }
+                    const isMe = m.senderId === this.myId;
+                    return `
+                        <div class="flex flex-col ${isMe ? 'items-end' : 'items-start'}">
+                            <span class="text-[9px] text-slate-400 font-semibold mb-0.5 px-1">${this.escapeHTML(m.sender)}</span>
+                            <div class="px-2.5 py-1.5 rounded-xl max-w-[85%] break-words ${isMe ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-slate-800 text-slate-100 rounded-bl-none'}">
+                                ${this.escapeHTML(m.text)}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                if (shouldScroll) container.scrollTop = container.scrollHeight;
+            },
+
+            copyInviteLink() {
+                if (!this.roomCode) return;
+                const baseUrl = window.location.href.split('?')[0];
+                const inviteUrl = `${baseUrl}?room=${this.roomCode}`;
+                const tempInput = document.createElement('input');
+                tempInput.value = inviteUrl;
+                document.body.appendChild(tempInput);
+                tempInput.select();
+                document.execCommand('copy');
+                document.body.removeChild(tempInput);
+                this.showToast(`Invite Link & Code (${this.roomCode}) Copied!`, 'success');
+            },
+
+            downloadHTMLFile() {
+                const htmlContent = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+                const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'index.html';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                this.showToast('Downloaded index.html for GitHub Pages!', 'success');
+            },
+
+            toggleModal(id, show) {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.classList.toggle('hidden', !show);
+                el.classList.toggle('flex', show);
+            },
+
+            confirmLeaveRoom() {
+                if (!this.state) return;
+                if (!this.isHost) {
+                    this.sendToHost({ type: 'LEAVE_ROOM', playerId: this.myId });
+                }
+                this.returnToHome();
+            },
+
+            returnToHome() {
+                this.cleanupNetworking();
+                this.state = null;
+                this.roomCode = '';
+                this.lastRenderedGridKey = '';
+                document.getElementById('podiumModal').classList.add('hidden');
+                document.getElementById('podiumModal').classList.remove('flex');
+                this.switchView('viewHome');
+            },
+
+            showToast(message, type = 'info') {
+                const container = document.getElementById('toastContainer');
+                const toast = document.createElement('div');
+                const colorMap = {
+                    info: 'border-indigo-500/50 bg-slate-900/95 text-indigo-200',
+                    success: 'border-emerald-500/50 bg-slate-900/95 text-emerald-300',
+                    error: 'border-rose-500/50 bg-slate-900/95 text-rose-300'
+                };
+                toast.className = `px-3.5 py-2.5 rounded-xl border shadow-xl text-xs font-semibold flex items-center gap-2 transition-all duration-300 ${colorMap[type] || colorMap.info}`;
+                toast.innerHTML = `<i class="fa-solid fa-bolt"></i> <span>${this.escapeHTML(message)}</span>`;
+                container.appendChild(toast);
+                setTimeout(() => {
+                    toast.style.opacity = '0';
+                    setTimeout(() => toast.remove(), 300);
+                }, 3000);
+            },
+
+            escapeHTML(str) {
+                return String(str).replace(/[&<>"']/g, m => ({
+                    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+                }[m]));
+            }
+        };
+
+        window.onload = () => app.init();
+    </script>
+</body>
+</html>
